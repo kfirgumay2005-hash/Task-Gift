@@ -1,8 +1,10 @@
-import { Notice, setIcon } from "obsidian";
+import { Notice, setIcon, TFile } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import type { Task } from "../types";
 import { filterFor, isExcludedFromGift, isListIncluded, matchesDateFilter } from "../filters/dates";
 import { today } from "../util/dates";
+import { playGiftSound } from "../audio/sounds";
+import { isVideo } from "../util/media";
 import { renderCard } from "./card";
 
 type Motion = "full" | "fade" | "none";
@@ -18,14 +20,23 @@ function shuffle<T>(arr: T[]): T[] {
 	return a;
 }
 
-const CONFETTI_COLORS = ["var(--color-red)", "var(--color-orange)", "var(--color-yellow)", "var(--color-green)", "var(--color-cyan)", "var(--color-purple)", "var(--interactive-accent)"];
+const CONFETTI_COLORS = ["var(--color-red)", "var(--color-orange)", "var(--color-yellow)", "var(--color-green)", "var(--color-cyan)", "var(--color-purple)", "var(--color-pink)", "var(--interactive-accent)"];
+const CONFETTI_SHAPES = ["", "is-round", "is-star", "is-streamer"];
+const FLOATERS = ["🎉", "✨", "⭐", "🎊", "💫", "🌟"];
+
+const rand = (min: number, max: number) => min + Math.random() * (max - min);
 
 /** Gift mode: draws tasks at random and reveals them one gift at a time. */
 export class GiftController {
 	private animating = false;
 	private renderQueued = false;
 	private justFinished = false;
-	private swapInId: string | null = null;
+	/** The gift was just re-wrapped by "Draw again". */
+	private rewrapped = false;
+	/** Background image currently shown; re-rolled for every new gift when the pick is "random". */
+	private background: string | null = null;
+	/** Kept across re-renders so a video background doesn't restart on every refresh. */
+	private video: HTMLVideoElement | null = null;
 	private container: HTMLElement | null = null;
 
 	constructor(private readonly plugin: TaskGiftPlugin) {}
@@ -63,7 +74,8 @@ export class GiftController {
 	private reconcile(): void {
 		const g = this.state;
 		const store = this.plugin.store;
-		const before = JSON.stringify([g.drawn, g.done, g.opened]);
+		const before = JSON.stringify([g.drawn, g.done, g.opened, g.pendingRedraw]);
+		if (!g.opened) g.pendingRedraw = 0;
 		g.drawn = g.drawn.map((id) => store.resolveAlias(id)).filter((id) => store.get(id));
 		g.done = g.done.map((id) => store.resolveAlias(id)).filter((id) => g.drawn.includes(id));
 		for (const id of g.drawn) {
@@ -72,18 +84,19 @@ export class GiftController {
 			if (isDone && !g.done.includes(id)) g.done.push(id);
 			if (!isDone && g.done.includes(id)) g.done = g.done.filter((x) => x !== id);
 		}
-		if (g.opened && g.drawn.length > 0 && g.drawn.every((id) => g.done.includes(id))) {
+		if (g.opened && !g.pendingRedraw && g.drawn.length > 0 && g.drawn.every((id) => g.done.includes(id))) {
 			g.opened = false;
 			g.drawn = [];
 			g.done = [];
 			this.justFinished = true;
+			this.nextBackground();
 		}
-		if (g.opened && g.drawn.length === 0) g.opened = false;
+		if (g.opened && g.drawn.length === 0 && !g.pendingRedraw) g.opened = false;
 		if (!g.opened && g.drawn.length) {
 			g.drawn = [];
 			g.done = [];
 		}
-		if (JSON.stringify([g.drawn, g.done, g.opened]) !== before) this.plugin.touch();
+		if (JSON.stringify([g.drawn, g.done, g.opened, g.pendingRedraw]) !== before) this.plugin.touch();
 	}
 
 	private pick(n: number, exclude: Set<string>, avoid: Set<string>): Task[] {
@@ -100,9 +113,13 @@ export class GiftController {
 			return;
 		}
 		this.reconcile();
+		// Keep confetti that is still flying across the re-render.
+		const flying = Array.from(container.querySelectorAll<HTMLElement>(".tg-confetti"));
 		container.empty();
 		const stage = container.createDiv({ cls: "tg-gift-stage" });
 		stage.toggleClass("is-no-motion", this.motion() === "none");
+		this.applyBackground(stage);
+		for (const layer of flying) stage.appendChild(layer);
 
 		if (this.plugin.settings.showGiftCounter) {
 			const counter = stage.createDiv({ cls: "tg-gift-counter" });
@@ -111,6 +128,10 @@ export class GiftController {
 		}
 
 		const g = this.state;
+		if (g.opened && g.pendingRedraw > 0) {
+			this.renderWrapped(stage);
+			return;
+		}
 		if (g.opened && g.drawn.length) {
 			this.renderRevealed(stage, false);
 			return;
@@ -125,6 +146,57 @@ export class GiftController {
 			return;
 		}
 		this.renderWrapped(stage);
+	}
+
+	/** Picks the next background: the chosen image, or a random one (different from the last when possible). */
+	private nextBackground(): void {
+		const s = this.plugin.settings;
+		const vault = this.plugin.app.vault;
+		const existing = s.giftBackgrounds.filter((path) => vault.getAbstractFileByPath(path) instanceof TFile);
+		if (s.giftBackgroundPick !== "random" && existing.includes(s.giftBackgroundPick)) {
+			this.background = s.giftBackgroundPick;
+			return;
+		}
+		const pool = existing.length > 1 ? existing.filter((path) => path !== this.background) : existing;
+		this.background = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+	}
+
+	private applyBackground(stage: HTMLElement): void {
+		const s = this.plugin.settings;
+		const stale =
+			this.background === null ||
+			!s.giftBackgrounds.includes(this.background) ||
+			(s.giftBackgroundPick !== "random" && this.background !== s.giftBackgroundPick);
+		if (stale) this.nextBackground();
+		const file = this.background ? this.plugin.app.vault.getAbstractFileByPath(this.background) : null;
+		if (!(file instanceof TFile)) {
+			this.video = null;
+			return;
+		}
+		const src = this.plugin.app.vault.getResourcePath(file);
+		stage.addClass("has-background");
+		stage.style.setProperty("--tg-bg-dim", `${Math.min(90, Math.max(0, s.giftBackgroundDim))}%`);
+		if (!isVideo(file.path)) {
+			this.video = null;
+			stage.style.setProperty("--tg-bg-image", `url("${src}")`);
+			return;
+		}
+		stage.addClass("has-video");
+		if (!this.video || this.video.dataset.path !== file.path) {
+			this.video = createEl("video", { cls: "tg-bg-video", attr: { src, "aria-hidden": "true" } });
+			this.video.dataset.path = file.path;
+			// Muted + playsinline are required for autoplay, especially on mobile.
+			this.video.muted = true;
+			this.video.loop = true;
+			this.video.autoplay = true;
+			this.video.playsInline = true;
+		}
+		stage.prepend(this.video);
+		stage.createDiv({ cls: "tg-bg-dim" });
+		// Moving the element out of the document pauses it; resume where it was.
+		void this.video.play().catch(() => {
+			/* autoplay blocked: the first frame stays as a still background */
+		});
 	}
 
 	private requeue(): void {
@@ -144,6 +216,9 @@ export class GiftController {
 
 	private buildBox(parent: HTMLElement): HTMLElement {
 		const box = parent.createDiv({ cls: "tg-giftbox", attr: { "aria-hidden": "true" } });
+		box.createDiv({ cls: "tg-gift-halo" });
+		box.createDiv({ cls: "tg-gift-rays" });
+		box.createDiv({ cls: "tg-gift-ring" });
 		box.createDiv({ cls: "tg-gift-burst" });
 		box.createDiv({ cls: "tg-gift-shadow" });
 		const body = box.createDiv({ cls: "tg-gift-body" });
@@ -161,20 +236,24 @@ export class GiftController {
 
 	private renderWrapped(stage: HTMLElement): void {
 		const wrap = stage.createDiv({ cls: "tg-gift-wrap" });
-		if (this.justFinished) wrap.addClass("is-new");
+		if (this.justFinished || this.rewrapped) wrap.addClass("is-new");
 		const box = this.buildBox(wrap);
 		box.setAttr("role", "button");
 		box.setAttr("tabindex", "0");
 		box.setAttr("aria-label", "Open gift");
 
 		const caption = wrap.createDiv({ cls: "tg-gift-caption" });
-		if (this.justFinished) {
+		if (this.state.pendingRedraw > 0) {
+			caption.createDiv({ cls: "tg-gift-caption-title", text: "Back in the box 🔄" });
+			caption.createDiv({ text: "A different gift is waiting. Open it when you're ready." });
+		} else if (this.justFinished) {
 			caption.createDiv({ cls: "tg-gift-caption-title", text: "Nice work! 🎉" });
 			caption.createDiv({ text: "Take a breath. A new gift is here whenever you're ready." });
 		} else {
 			caption.createDiv({ cls: "tg-gift-caption-title", text: "A gift is waiting for you" });
 			caption.createDiv({ text: "Open it when you feel ready." });
 		}
+		this.rewrapped = false;
 		const btn = wrap.createEl("button", { cls: "mod-cta tg-open-btn", text: "Open gift" });
 		const open = () => void this.openGift(stage, wrap, box, btn);
 		btn.addEventListener("click", open);
@@ -190,7 +269,10 @@ export class GiftController {
 	private async openGift(stage: HTMLElement, wrap: HTMLElement, box: HTMLElement, btn: HTMLButtonElement): Promise<void> {
 		if (this.animating) return;
 		const g = this.state;
-		const picks = this.pick(Math.max(1, this.plugin.settings.tasksPerGift), new Set(), new Set(g.recent));
+		const redraw = g.opened && g.pendingRedraw > 0;
+		const picks = redraw
+			? this.pick(g.pendingRedraw, new Set([...g.drawn, ...g.recent.slice(0, 1)]), new Set(g.recent))
+			: this.pick(Math.max(1, this.plugin.settings.tasksPerGift), new Set(), new Set(g.recent));
 		if (!picks.length) {
 			new Notice("No tasks to draw right now.");
 			return;
@@ -198,15 +280,20 @@ export class GiftController {
 		this.animating = true;
 		this.justFinished = false;
 		// Persist the draw immediately so a reload never rerolls.
-		g.drawn = picks.map((t) => t.id);
-		g.done = [];
-		g.opened = true;
-		g.recent = [];
-		if (g.openedTodayDate !== today()) {
-			g.openedTodayDate = today();
-			g.openedTodayCount = 0;
+		if (redraw) {
+			g.drawn = [...g.drawn, ...picks.map((t) => t.id)];
+			g.pendingRedraw = 0;
+		} else {
+			g.drawn = picks.map((t) => t.id);
+			g.done = [];
+			g.opened = true;
+			g.recent = [];
+			if (g.openedTodayDate !== today()) {
+				g.openedTodayDate = today();
+				g.openedTodayCount = 0;
+			}
+			g.openedTodayCount++;
 		}
-		g.openedTodayCount++;
 		await this.plugin.persist();
 		this.plugin.touch();
 
@@ -216,46 +303,107 @@ export class GiftController {
 		const motion = this.motion();
 		try {
 			if (motion === "full") {
+				// 1. Charge up: the box trembles harder and harder while sparkles gather.
+				stage.addClass("is-charging");
 				box.addClass("is-shaking");
-				await wait(750);
+				this.gatherSparkles(stage, box);
+				await wait(1100);
+				// 2. Burst: lid flies, light rays, shockwave, flash and confetti.
+				stage.removeClass("is-charging");
 				box.removeClass("is-shaking");
 				box.addClass("is-opening");
-				this.confetti(wrap);
-				await wait(650);
+				playGiftSound(this.plugin.app, this.plugin.settings);
+				this.flash(stage);
+				this.confetti(stage, box, 80);
+				this.floaters(stage, box);
+				await wait(850);
+				// 3. The box sinks away and the task rises in its place.
 				wrap.addClass("is-leaving");
-				await wait(250);
-			} else if (motion === "fade") {
-				wrap.addClass("is-fading");
-				await wait(300);
+				await wait(320);
+			} else {
+				playGiftSound(this.plugin.app, this.plugin.settings);
+				if (motion === "fade") {
+					wrap.addClass("is-fading");
+					await wait(300);
+				}
 			}
 			wrap.remove();
 			this.renderRevealed(stage, motion !== "none");
-			if (motion !== "none") await wait(700);
+			if (motion !== "none") await wait(900);
 		} finally {
 			this.requeue();
 		}
 	}
 
-	private confetti(parent: HTMLElement): void {
-		const layer = parent.createDiv({ cls: "tg-confetti" });
-		for (let i = 0; i < 36; i++) {
+	/** An absolutely positioned layer in `stage`, centred on `anchor`. */
+	private layerAt(stage: HTMLElement, anchor: HTMLElement, cls: string): HTMLElement {
+		const s = stage.getBoundingClientRect();
+		const a = anchor.getBoundingClientRect();
+		const layer = stage.createDiv({ cls });
+		layer.style.setProperty("--tg-cx", `${a.left - s.left + a.width / 2}px`);
+		layer.style.setProperty("--tg-cy", `${a.top - s.top + a.height / 2}px`);
+		return layer;
+	}
+
+	private confetti(stage: HTMLElement, anchor: HTMLElement, count: number): void {
+		const layer = this.layerAt(stage, anchor, "tg-confetti");
+		for (let i = 0; i < count; i++) {
+			const shape = CONFETTI_SHAPES[i % CONFETTI_SHAPES.length];
 			const piece = layer.createSpan({ cls: "tg-confetti-piece" });
-			const angle = Math.random() * Math.PI - Math.PI; // upward half
-			const dist = 90 + Math.random() * 140;
+			if (shape) piece.addClass(shape);
+			const angle = rand(-Math.PI * 0.95, -Math.PI * 0.05); // mostly upward
+			const dist = rand(110, 300);
 			piece.style.setProperty("--tg-x", `${Math.cos(angle) * dist}px`);
 			piece.style.setProperty("--tg-y", `${Math.sin(angle) * dist}px`);
-			piece.style.setProperty("--tg-r", `${Math.random() * 720 - 360}deg`);
-			piece.style.setProperty("--tg-delay", `${Math.random() * 120}ms`);
+			piece.style.setProperty("--tg-fall", `${rand(120, 260)}px`);
+			piece.style.setProperty("--tg-r", `${rand(-900, 900)}deg`);
+			piece.style.setProperty("--tg-delay", `${rand(0, 180)}ms`);
+			piece.style.setProperty("--tg-dur", `${rand(1300, 2100)}ms`);
 			piece.style.setProperty("--tg-color", CONFETTI_COLORS[i % CONFETTI_COLORS.length]);
-			if (i % 3 === 0) piece.addClass("is-round");
 		}
-		window.setTimeout(() => layer.remove(), 1800);
+		window.setTimeout(() => layer.remove(), 2600);
+	}
+
+	/** Sparkles that drift in towards the box while it charges up. */
+	private gatherSparkles(stage: HTMLElement, anchor: HTMLElement): void {
+		const layer = this.layerAt(stage, anchor, "tg-sparkles");
+		for (let i = 0; i < 18; i++) {
+			const sp = layer.createSpan({ cls: "tg-sparkle", text: "✦" });
+			const angle = rand(0, Math.PI * 2);
+			const dist = rand(110, 190);
+			sp.style.setProperty("--tg-x", `${Math.cos(angle) * dist}px`);
+			sp.style.setProperty("--tg-y", `${Math.sin(angle) * dist}px`);
+			sp.style.setProperty("--tg-delay", `${rand(0, 700)}ms`);
+			sp.style.setProperty("--tg-size", `${rand(10, 20)}px`);
+			sp.style.setProperty("--tg-color", CONFETTI_COLORS[i % CONFETTI_COLORS.length]);
+		}
+		window.setTimeout(() => layer.remove(), 1300);
+	}
+
+	/** Emoji that float up and fade after the burst. */
+	private floaters(stage: HTMLElement, anchor: HTMLElement): void {
+		const layer = this.layerAt(stage, anchor, "tg-floaters");
+		for (let i = 0; i < 9; i++) {
+			const f = layer.createSpan({ cls: "tg-floater", text: FLOATERS[i % FLOATERS.length] });
+			f.style.setProperty("--tg-x", `${rand(-170, 170)}px`);
+			f.style.setProperty("--tg-y", `${rand(-260, -150)}px`);
+			f.style.setProperty("--tg-delay", `${rand(60, 400)}ms`);
+			f.style.setProperty("--tg-size", `${rand(18, 32)}px`);
+			f.style.setProperty("--tg-r", `${rand(-40, 40)}deg`);
+		}
+		window.setTimeout(() => layer.remove(), 2400);
+	}
+
+	private flash(stage: HTMLElement): void {
+		const el = stage.createDiv({ cls: "tg-flash" });
+		window.setTimeout(() => el.remove(), 700);
 	}
 
 	private renderRevealed(stage: HTMLElement, animate: boolean): void {
 		const g = this.state;
 		const store = this.plugin.store;
 		const reveal = stage.createDiv({ cls: "tg-reveal" });
+		if (animate && this.motion() === "full") reveal.addClass("is-entering");
 		const remaining = g.drawn.filter((id) => !g.done.includes(id));
 		if (g.drawn.length > 1) {
 			reveal.createDiv({ cls: "tg-reveal-progress", text: `${g.done.length} of ${g.drawn.length} done` });
@@ -269,7 +417,6 @@ export class GiftController {
 				slot.addClass(this.motion() === "full" ? "is-revealing" : "is-fading-in");
 				slot.style.setProperty("--tg-stagger", `${i * 110}ms`);
 			}
-			if (this.swapInId === id) slot.addClass("is-swapping-in");
 			renderCard(slot, this.plugin, task, { showList: true, draggable: false, checkbox: false, notesLines: 6, menu: false });
 			const actions = slot.createDiv({ cls: "tg-gift-actions" });
 			const doneBtn = actions.createEl("button", { cls: "mod-cta tg-done-btn" });
@@ -281,7 +428,6 @@ export class GiftController {
 			againBtn.createSpan({ text: "Draw again" });
 			againBtn.addEventListener("click", () => void this.drawAgain(task, slot));
 		});
-		this.swapInId = null;
 	}
 
 	private async markDone(task: Task, slot: HTMLElement): Promise<void> {
@@ -290,6 +436,8 @@ export class GiftController {
 		try {
 			if (this.motion() !== "none") {
 				slot.addClass("is-finishing");
+				const stage = slot.closest<HTMLElement>(".tg-gift-stage");
+				if (this.motion() === "full" && stage) this.confetti(stage, slot, 30);
 				await wait(this.motion() === "full" ? 550 : 250);
 			}
 			const g = this.state;
@@ -314,12 +462,16 @@ export class GiftController {
 		this.animating = true;
 		try {
 			if (this.motion() !== "none") {
+				// The card flips back into the box, and a freshly wrapped gift takes its place.
 				slot.addClass("is-swapping-out");
 				await wait(this.motion() === "full" ? 320 : 200);
 			}
-			g.drawn = g.drawn.map((id) => (id === task.id ? next.id : id));
+			g.drawn = g.drawn.filter((id) => id !== task.id);
+			g.done = g.done.filter((id) => id !== task.id);
+			g.pendingRedraw = (g.pendingRedraw || 0) + 1;
 			g.recent = [task.id, ...g.recent.filter((x) => x !== task.id)].slice(0, 5);
-			if (this.motion() !== "none") this.swapInId = next.id;
+			this.rewrapped = this.motion() !== "none";
+			this.nextBackground();
 			await this.plugin.persist();
 			this.renderQueued = true;
 		} finally {

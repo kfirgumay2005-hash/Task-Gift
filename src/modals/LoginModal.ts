@@ -85,8 +85,8 @@ export class LoginModal extends Modal {
 				.then((code) => {
 					if (this.session === session && this.connectBtn) void this.finish("", this.connectBtn, code);
 				})
-				.catch((e) => {
-					if (!ctrl.signal.aborted) console.info("[Task Gift] Automatic pickup unavailable, paste the address instead:", e);
+				.catch(() => {
+					/* Automatic pickup unavailable (e.g. port busy): pasting the address still works. */
 				});
 		}
 		openInBrowser(session.url);

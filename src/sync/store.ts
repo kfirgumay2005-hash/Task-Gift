@@ -32,7 +32,7 @@ export interface TaskEdit {
 	recurrence?: RecurrenceRule | null;
 }
 
-export type ChangeSource = "local" | "note" | "remote";
+export type ChangeSource = "local" | "remote";
 
 /**
  * Holds all task state and is the only place that mutates it.
@@ -214,7 +214,6 @@ export class TaskStore {
 		g.drawn = g.drawn.map((x) => (x === oldId ? newId : x));
 		g.done = g.done.map((x) => (x === oldId ? newId : x));
 		g.recent = g.recent.map((x) => (x === oldId ? newId : x));
-		this.data.renderedIds = this.data.renderedIds.map((x) => (x === oldId ? newId : x));
 		this.data.aliases[oldId] = newId;
 		const keys = Object.keys(this.data.aliases);
 		if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete this.data.aliases[k];
@@ -238,7 +237,6 @@ export class TaskStore {
 		const time = this.data.times[task.id];
 		if (time) this.data.times[created.id] = time;
 		this.data.spawned[task.id] = created.id;
-		console.info(`[Task Gift] Recurring task "${task.title}" completed; next occurrence on ${next.due}.`);
 	}
 
 	/** Drops old completed tasks from local state (they stay in Google). */

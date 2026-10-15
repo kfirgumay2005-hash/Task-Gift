@@ -1,9 +1,17 @@
-import { Notice, setIcon } from "obsidian";
+import { Menu, Notice, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
-import type { Task } from "../types";
+import type { BoardSort, Task } from "../types";
 import { filterFor, isListIncluded, matchesDateFilter } from "../filters/dates";
 import { addDays, today } from "../util/dates";
 import { renderCard } from "./card";
+
+/** View-local (not saved) per-column search state. */
+export interface BoardUiState {
+	/** Search text per column key. */
+	queries: Map<string, string>;
+	/** Columns whose search box is open. */
+	searchOpen: Set<string>;
+}
 
 interface Column {
 	key: string;
@@ -25,6 +33,35 @@ function byDueThenPosition(a: Task, b: Task): number {
 	return a.position.localeCompare(b.position);
 }
 
+/** Completion date for completed tasks, due date otherwise. */
+function sortDate(t: Task): string | null {
+	return (t.status === "completed" ? t.completed ?? t.due : t.due) ?? null;
+}
+
+function comparator(sort: BoardSort): (a: Task, b: Task) => number {
+	if (sort === "default") return byDueThenPosition;
+	const dir = sort === "dateAsc" ? 1 : -1;
+	return (a, b) => {
+		if (a.status !== b.status) return a.status === "completed" ? 1 : -1;
+		const ad = sortDate(a);
+		const bd = sortDate(b);
+		// Undated tasks always go last.
+		if (ad !== bd) {
+			if (!ad) return 1;
+			if (!bd) return -1;
+			return ad < bd ? -dir : dir;
+		}
+		return a.position.localeCompare(b.position);
+	};
+}
+
+/** True when the title or description contains the search text (case-insensitive). */
+export function matchesQuery(t: Task, query: string): boolean {
+	const q = query.trim().toLowerCase();
+	if (!q) return true;
+	return t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q);
+}
+
 /** Tasks shown in the board, after list / date / completed filters. */
 export function boardTasks(plugin: TaskGiftPlugin): Task[] {
 	const s = plugin.settings;
@@ -35,6 +72,8 @@ export function boardTasks(plugin: TaskGiftPlugin): Task[] {
 		.filter((t) => s.grouping === "status" || s.showCompleted || t.status !== "completed")
 		.filter((t) => matchesDateFilter(t, filter, s.weekStart));
 }
+
+const SORT_LABELS: Record<BoardSort, string> = { default: "Default order", dateAsc: "Date: oldest first", dateDesc: "Date: newest first" };
 
 function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	const s = plugin.settings;
@@ -78,6 +117,8 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	}
 
 	const group = (t: Task): string => {
+		// Completed tasks are never overdue; they get their own column.
+		if (t.status === "completed") return "completed";
 		if (!t.due) return "none";
 		if (t.due < t0) return "overdue";
 		if (t.due === t0) return "today";
@@ -98,14 +139,14 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 			newDefaults: { due: addDays(t0, 2) },
 		},
 		{ key: "none", title: "No date", icon: "calendar-off", tasks: [], onDrop: (t) => setDue(t, null), newDefaults: { due: null } },
+		{ key: "completed", title: "Completed", icon: "check-circle-2", tasks: [], onDrop: (t) => store.setCompleted(t.id, true), accent: "done" },
 	];
 	for (const t of tasks) cols.find((c) => c.key === group(t))?.tasks.push(t);
-	return cols.filter((c) => c.key !== "overdue" || c.tasks.length > 0);
+	return cols.filter((c) => (c.key !== "overdue" && c.key !== "completed") || c.tasks.length > 0);
 }
 
-export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin): void {
-	const tasks = boardTasks(plugin);
-	const columns = buildColumns(plugin, tasks);
+export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState): void {
+	const columns = buildColumns(plugin, boardTasks(plugin));
 	const board = container.createDiv({ cls: "tg-board" });
 
 	if (!columns.length) {
@@ -115,47 +156,131 @@ export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin): voi
 		return;
 	}
 
-	for (const col of columns) {
-		const colEl = board.createDiv({ cls: "tg-column" });
-		if (col.accent) colEl.addClass(`is-${col.accent}`);
-		const header = colEl.createDiv({ cls: "tg-column-header" });
-		setIcon(header.createSpan({ cls: "tg-column-icon" }), col.icon);
-		header.createSpan({ cls: "tg-column-title", text: col.title });
-		header.createSpan({ cls: "tg-column-count", text: String(col.tasks.filter((t) => t.status !== "completed").length) });
-		if (col.newDefaults) {
-			const add = header.createEl("button", { cls: "clickable-icon tg-column-add", attr: { "aria-label": `Add task to ${col.title}` } });
-			setIcon(add, "plus");
-			add.addEventListener("click", () => plugin.openTaskModal(undefined, col.newDefaults));
-		}
+	for (const col of columns) renderColumn(board, plugin, ui, col);
+}
 
-		const list = colEl.createDiv({ cls: "tg-column-cards" });
-		const sorted = [...col.tasks].sort(byDueThenPosition);
-		for (const t of sorted) {
-			renderCard(list, plugin, t, { showList: plugin.settings.grouping !== "list", draggable: true, checkbox: true });
-		}
-		if (!sorted.length) list.createDiv({ cls: "tg-column-empty", text: col.onDrop ? "Drop tasks here" : "Nothing here" });
+function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, col: Column): void {
+	const settings = plugin.settings;
+	const colEl = board.createDiv({ cls: "tg-column" });
+	colEl.dataset.column = col.key;
+	if (col.accent) colEl.addClass(`is-${col.accent}`);
+	const header = colEl.createDiv({ cls: "tg-column-header" });
+	setIcon(header.createSpan({ cls: "tg-column-icon" }), col.icon);
+	header.createSpan({ cls: "tg-column-title", text: col.title });
+	const countEl = header.createSpan({ cls: "tg-column-count" });
 
-		if (col.onDrop) {
-			const onDrop = col.onDrop;
-			colEl.addEventListener("dragover", (e) => {
-				if (!e.dataTransfer?.types.includes("text/x-task-gift")) return;
-				e.preventDefault();
-				e.dataTransfer.dropEffect = "move";
-				colEl.addClass("is-drop-target");
-			});
-			colEl.addEventListener("dragleave", (e) => {
-				if (!colEl.contains(e.relatedTarget as Node | null)) colEl.removeClass("is-drop-target");
-			});
-			colEl.addEventListener("drop", (e) => {
-				e.preventDefault();
-				colEl.removeClass("is-drop-target");
-				const id = e.dataTransfer?.getData("text/x-task-gift");
-				const task = id ? plugin.store.get(id) : undefined;
-				if (!task) return;
-				if (col.tasks.some((t) => t.id === task.id)) return;
-				if (task.parent && plugin.settings.grouping === "list") new Notice("Subtask moved to the other list as a top-level task.");
-				onDrop(task);
-			});
+	// --- search (this column only)
+	const searchBtn = header.createEl("button", { cls: "clickable-icon tg-column-tool", attr: { "aria-label": `Search in ${col.title}` } });
+	setIcon(searchBtn, "search");
+	// --- sort (this column only, saved)
+	const sort = settings.columnSort[col.key] ?? "default";
+	const sortBtn = header.createEl("button", { cls: "clickable-icon tg-column-tool", attr: { "aria-label": `Sort ${col.title}: ${SORT_LABELS[sort]}` } });
+	setIcon(sortBtn, sort === "dateDesc" ? "arrow-down-wide-narrow" : sort === "dateAsc" ? "arrow-up-narrow-wide" : "arrow-up-down");
+	sortBtn.toggleClass("is-active", sort !== "default");
+	sortBtn.addEventListener("click", (e) => {
+		const menu = new Menu();
+		for (const k of Object.keys(SORT_LABELS) as BoardSort[]) {
+			menu.addItem((i) =>
+				i
+					.setTitle(SORT_LABELS[k])
+					.setChecked(sort === k)
+					.onClick(() => {
+						if (k === "default") delete settings.columnSort[col.key];
+						else settings.columnSort[col.key] = k;
+						void plugin.saveSettings();
+					}),
+			);
 		}
+		menu.showAtMouseEvent(e);
+	});
+
+	if (col.newDefaults) {
+		const add = header.createEl("button", { cls: "clickable-icon tg-column-add", attr: { "aria-label": `Add task to ${col.title}` } });
+		setIcon(add, "plus");
+		add.addEventListener("click", () => plugin.openTaskModal(undefined, col.newDefaults));
+	}
+
+	const searchRow = colEl.createDiv({ cls: "tg-column-search" });
+	const input = searchRow.createEl("input", {
+		cls: "tg-column-search-input",
+		attr: { type: "search", placeholder: `Search ${col.title}…`, "aria-label": `Search in ${col.title}` },
+	});
+	input.dataset.column = col.key;
+	input.value = ui.queries.get(col.key) ?? "";
+
+	const list = colEl.createDiv({ cls: "tg-column-cards" });
+
+	/** Renders only this column's cards, so typing in its search box never loses focus. */
+	const fill = () => {
+		const query = ui.queries.get(col.key) ?? "";
+		const searching = query.trim() !== "";
+		const shown = col.tasks.filter((t) => matchesQuery(t, query)).sort(comparator(sort));
+		list.empty();
+		for (const t of shown) {
+			renderCard(list, plugin, t, { showList: settings.grouping !== "list", draggable: true, checkbox: true });
+		}
+		if (!shown.length) list.createDiv({ cls: "tg-column-empty", text: searching ? "No matches" : col.onDrop ? "Drop tasks here" : "Nothing here" });
+		const open = shown.filter((t) => t.status !== "completed").length;
+		const total = shown.length;
+		// Completed-only columns count their (completed) cards; others count open tasks.
+		countEl.setText(String(col.tasks.every((t) => t.status === "completed") ? total : open));
+		countEl.toggleClass("is-filtered", searching);
+		searchBtn.toggleClass("is-active", searching);
+	};
+
+	const setSearchOpen = (open: boolean) => {
+		if (open) ui.searchOpen.add(col.key);
+		else ui.searchOpen.delete(col.key);
+		colEl.toggleClass("is-searching", open);
+	};
+	setSearchOpen(ui.searchOpen.has(col.key) || input.value !== "");
+
+	searchBtn.addEventListener("click", () => {
+		const open = !ui.searchOpen.has(col.key);
+		setSearchOpen(open);
+		if (open) input.focus();
+		else if (input.value) {
+			input.value = "";
+			ui.queries.delete(col.key);
+			fill();
+		}
+	});
+	input.addEventListener("input", () => {
+		if (input.value) ui.queries.set(col.key, input.value);
+		else ui.queries.delete(col.key);
+		fill();
+	});
+	input.addEventListener("keydown", (e) => {
+		if (e.key !== "Escape") return;
+		e.preventDefault();
+		input.value = "";
+		ui.queries.delete(col.key);
+		setSearchOpen(false);
+		fill();
+	});
+
+	fill();
+
+	if (col.onDrop) {
+		const onDrop = col.onDrop;
+		colEl.addEventListener("dragover", (e) => {
+			if (!e.dataTransfer?.types.includes("text/x-task-gift")) return;
+			e.preventDefault();
+			e.dataTransfer.dropEffect = "move";
+			colEl.addClass("is-drop-target");
+		});
+		colEl.addEventListener("dragleave", (e) => {
+			if (!colEl.contains(e.relatedTarget as Node | null)) colEl.removeClass("is-drop-target");
+		});
+		colEl.addEventListener("drop", (e) => {
+			e.preventDefault();
+			colEl.removeClass("is-drop-target");
+			const id = e.dataTransfer?.getData("text/x-task-gift");
+			const task = id ? plugin.store.get(id) : undefined;
+			if (!task) return;
+			if (col.tasks.some((t) => t.id === task.id)) return;
+			if (task.parent && settings.grouping === "list") new Notice("Subtask moved to the other list as a top-level task.");
+			onDrop(task);
+		});
 	}
 }

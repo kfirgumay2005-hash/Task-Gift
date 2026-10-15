@@ -6,7 +6,6 @@ An Obsidian plugin that syncs your **Google Tasks** both ways and shows them eit
 
 - **Works on desktop and mobile** (iOS / Android), including Google sign-in.
 - **Two-way Google Tasks sync**: all lists, titles, notes, due dates, completion, subtasks. Create, edit, complete, uncomplete and delete from Obsidian or Google.
-- **Markdown mirror**: a note (default `Tasks/Google Tasks.md`) with one section per list. Edit it like any checklist and the changes go back to Google.
 - **Board view**: cards in columns grouped by list, by due date (Overdue / Today / Tomorrow / Later / No date) or by status. Drag cards between columns, or use the ⋯ menu (long-press on mobile), to move them between lists, change the date or complete them.
 - **Gift mode**: a wrapped box that reveals 1–5 random tasks, with "Done" and "Draw again" buttons. The current draw survives restarts.
 - **Task modal**: title, notes, list, date, time, and Google-Calendar-style recurrence.
@@ -62,41 +61,29 @@ Settings, the Google sign-in, sync state, repeat rules and times are stored in a
 
 ## Using it
 
-- **Open the view** with the gift icon in the ribbon, or the command *Task Gift: Open Task Gift*.
+- **Open the view** with the gift icon in the ribbon, or the command *Task Gift: Open board*.
 - **New task**: the list-plus ribbon icon, the `+` in the view header or in a column, or the command *Task Gift: New task*.
 - **Edit**: click a card. The modal also has **Delete**.
 - **Sync**: automatic on startup, every N minutes (default 5) and about 1.5 seconds after local edits. You can also use the sync button, the command *Sync now*, or *Full resync* to re-download everything.
+- **Search a column**: the 🔍 button in a column header opens a search box for that column only; it filters its cards by title or description as you type (Esc clears and closes it).
+- **Sort a column**: the sort button next to it orders that column's cards by date, oldest or newest first (completion date for completed tasks, due date otherwise), or back to the default order. Each column remembers its own order.
+- **All completed tasks**: set *Keep completed tasks* to *Forever (no limit)*, or use *Download all completed tasks* in settings (or the command of the same name) to pull every completed task you have in Google, however old.
+- **Board by due date**: completed tasks (with *Show completed* on) go to their own *Completed* column, never to *Overdue*.
 - **Gift mode**: switch with the Board / Gift toggle in the header, the setting "Hide task board, show gifts instead", or the command *Toggle gift mode*.
-  - **Open gift** shakes the box, pops the lid and reveals the drawn task(s).
+  - **Open gift** charges the box up (it trembles harder and sparkles gather), then bursts open with light rays, confetti and a flash, and the drawn task(s) flip up out of it.
+  - **Sound**: a sound plays when the gift bursts. Pick one of three built-in sounds (Happy Birthday, Chime, Magic wand), a random one each time, or your own mp3/wav/ogg file from the vault (*Import…* copies one from this device into your attachments folder). Turn it off or set the volume under *Gift sounds* in settings.
   - **Done** completes the task in Google. Once every drawn task is done, a fresh wrapped gift appears, and it waits for you to open it.
-  - **Draw again** puts the task back and draws a different one. The rejected task is avoided for the next few draws if there are alternatives.
+  - **Draw again** puts the task back in the box: a freshly wrapped gift appears, and opening it reveals a different task. The rejected task is avoided for the next few draws if there are alternatives.
+  - **Backgrounds**: under *Gift backgrounds* in settings, add as many images, animated GIFs or videos (mp4, webm, mov; played muted and looped) as you like, from your computer or phone (they are copied into your attachments folder, as set in Obsidian's *Files and links* settings) or from images already in the vault. Show a random one for every gift, or always the same one. *Fade the image* blends it into your theme so the cards stay readable.
   - The current draw is saved, so closing Obsidian or the view never rerolls it.
   - With *Reduce motion* enabled in your OS, the animations become a simple fade. You can also turn animations off completely in settings.
-
-### The sync note
-
-```markdown
-## Work <!-- gtl:MDk2... -->
-
-- [ ] Write report 📅 2025-10-20 ⏰ 09:30 🔄 weekly on Mon <!-- gt:abc123 -->
-	> notes go on indented "> " lines
-	- [ ] A subtask <!-- gt:def456 -->
-- [ ] A brand new task 📅 2025-10-21
-```
-
-- **Add a task** by writing a new `- [ ]` line under a list heading; it gets its hidden ID after the next sync. You can add `📅 YYYY-MM-DD` and `⏰ HH:MM`.
-- **Edit** the text, date, time or checkbox. **Move** a line under another heading to move the task to another list. **Indent** it under another task to make it a subtask.
-- **Delete** a line to delete the task in Google. If more than half of the tasks (and at least 5) disappear at once, Task Gift asks before deleting anything.
-- Keep the `<!-- gt:… -->` markers (hidden in Reading view and Live Preview). The `🔄` text is display-only; edit recurrence in the modal.
-- Edits are applied as a 3-way diff against the last rendered version, so the note never overwrites changes made in Google or on the board meanwhile.
-- Changing the list headings themselves (renaming or creating lists) is not synced; manage lists in Google Tasks.
 
 ## Recurrence and due times (important)
 
 The Google Tasks API **cannot create recurring tasks** and **stores dates only, no times**. Task Gift works around this:
 
-- The repeat rule and the time are stored in the Task Gift data note, keyed by task ID, and shown on cards and in the note.
-- When a repeating task is completed, from anywhere (board, gift, note, or the Google Tasks app, picked up on the next sync), Task Gift creates the **next occurrence** in Google with the next due date and moves the rule to it. Ends "after N occurrences" and "on date" are honoured.
+- The repeat rule and the time are stored in the Task Gift data note, keyed by task ID, and shown on cards.
+- When a repeating task is completed, from anywhere (board, gift, or the Google Tasks app, picked up on the next sync), Task Gift creates the **next occurrence** in Google with the next due date and moves the rule to it. Ends "after N occurrences" and "on date" are honoured.
 - Google's apps only see ordinary one-off tasks with a date. If Obsidian isn't running, the next occurrence is created on the next sync.
 - Repeat rules created in the Google Tasks app itself can't be read through the API. Those tasks show up as ordinary tasks.
 
@@ -115,7 +102,6 @@ The Google Tasks API **cannot create recurring tasks** and **stores dates only, 
 |---|---|---|
 | Connect Google account | ✅ automatic or manual | ✅ manual sign-in (paste the address) |
 | Sync, board, gift mode, task modal, recurrence | ✅ | ✅ |
-| Sync note editing | ✅ | ✅ |
 | Moving cards | drag & drop, or the ⋯ menu / right-click | ⋯ button or long-press on a card: complete, reschedule (today / tomorrow / next week / no date), move to another list, delete |
 
 All network calls use Obsidian's `requestUrl`, so they work on mobile too. Install the plugin on the phone by copying `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/Task Gift/` (Obsidian Sync with "Installed community plugins" enabled does this automatically).
@@ -142,7 +128,6 @@ src/
   api/client.ts       typed Google Tasks API client (pagination, throttling, retries)
   sync/store.ts       local task store and all local mutations (+ recurrence spawning)
   sync/engine.ts      pull / push / conflict handling
-  sync/note.ts        markdown mirror: render + parse + 3-way diff
   recurrence/rule.ts  recurrence model and next-date calculation
   filters/dates.ts    date range filters
   views/              TaskView (header), board, gift mode, card

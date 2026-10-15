@@ -4,13 +4,15 @@ import { VIEW_TYPE } from "../defaults";
 import { describeFilter, filterFor } from "../filters/dates";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
-import { renderBoard } from "./board";
+import { BoardUiState, renderBoard } from "./board";
 import { GiftController } from "./gift";
 
 const GROUPING_LABELS: Record<Grouping, string> = { list: "By list", date: "By due date", status: "By status" };
 
 export class TaskView extends ItemView {
 	private headerEl!: HTMLElement;
+	/** Per-column search state; survives re-renders while the view is open. */
+	private boardUi: BoardUiState = { queries: new Map(), searchOpen: new Set() };
 	private bodyEl!: HTMLElement;
 	private syncBtn!: HTMLElement;
 	private gift: GiftController;
@@ -52,19 +54,48 @@ export class TaskView extends ItemView {
 		if (!this.bodyEl) return;
 		const mode = this.plugin.settings.giftMode ? "gift" : "board";
 		this.renderHeader(mode);
-		const scroll = this.bodyEl.querySelector(".tg-board")?.scrollLeft ?? 0;
 		this.contentEl.toggleClass("is-gift-mode", mode === "gift");
 		if (mode === "gift") {
 			if (this.renderedMode !== "gift") this.bodyEl.empty();
 			this.gift.render(this.bodyEl);
 		} else {
-			this.bodyEl.empty();
-			renderBoard(this.bodyEl, this.plugin);
-			const board = this.bodyEl.querySelector(".tg-board");
-			if (board) board.scrollLeft = scroll;
+			this.renderBoardBody();
 		}
 		this.renderedMode = mode;
 	}
+
+	private renderBoardBody(): void {
+		const board = this.bodyEl.querySelector(".tg-board");
+		const scrollLeft = board?.scrollLeft ?? 0;
+		// Remember each column's scroll so long columns (e.g. Completed) don't jump back to the top.
+		const columnScroll = new Map<string, number>();
+		this.bodyEl.querySelectorAll<HTMLElement>(".tg-column").forEach((c) => {
+			const cards = c.querySelector(".tg-column-cards");
+			if (c.dataset.column && cards) columnScroll.set(c.dataset.column, cards.scrollTop);
+		});
+		// A sync can re-render the board while someone is typing in a column's search box: keep focus and caret.
+		const active = activeDocument.activeElement;
+		const typingIn = active instanceof HTMLInputElement && active.hasClass("tg-column-search-input") ? active : null;
+		const caret = typingIn ? [typingIn.selectionStart, typingIn.selectionEnd] : null;
+
+		this.bodyEl.empty();
+		renderBoard(this.bodyEl, this.plugin, this.boardUi);
+
+		const next = this.bodyEl.querySelector(".tg-board");
+		if (next) next.scrollLeft = scrollLeft;
+		this.bodyEl.querySelectorAll<HTMLElement>(".tg-column").forEach((c) => {
+			const cards = c.querySelector(".tg-column-cards");
+			if (c.dataset.column && cards) cards.scrollTop = columnScroll.get(c.dataset.column) ?? 0;
+		});
+		if (typingIn?.dataset.column) {
+			const input = this.bodyEl.querySelector<HTMLInputElement>(`.tg-column-search-input[data-column="${CSS.escape(typingIn.dataset.column)}"]`);
+			if (input) {
+				input.focus();
+				if (caret) input.setSelectionRange(caret[0], caret[1]);
+			}
+		}
+	}
+
 
 	private renderHeader(mode: "board" | "gift"): void {
 		const p = this.plugin;
@@ -103,9 +134,9 @@ export class TaskView extends ItemView {
 						i
 							.setTitle(GROUPING_LABELS[g])
 							.setChecked(p.settings.grouping === g)
-							.onClick(async () => {
+							.onClick(() => {
 								p.settings.grouping = g;
-								await p.saveSettings();
+								void p.saveSettings();
 							}),
 					);
 				}
@@ -114,9 +145,9 @@ export class TaskView extends ItemView {
 					i
 						.setTitle("Show completed")
 						.setChecked(p.settings.showCompleted)
-						.onClick(async () => {
+						.onClick(() => {
 							p.settings.showCompleted = !p.settings.showCompleted;
-							await p.saveSettings();
+							void p.saveSettings();
 						}),
 				);
 				menu.showAtMouseEvent(e);
@@ -128,9 +159,9 @@ export class TaskView extends ItemView {
 			});
 			completed.toggleClass("is-active", p.settings.showCompleted);
 			setIcon(completed, p.settings.showCompleted ? "eye" : "eye-off");
-			completed.addEventListener("click", async () => {
+			completed.addEventListener("click", () => {
 				p.settings.showCompleted = !p.settings.showCompleted;
-				await p.saveSettings();
+				void p.saveSettings();
 			});
 		}
 
@@ -148,7 +179,6 @@ export class TaskView extends ItemView {
 		setIcon(more, "more-vertical");
 		more.addEventListener("click", (e) => {
 			const menu = new Menu();
-			menu.addItem((i) => i.setTitle("Open sync note").setIcon("file-text").onClick(() => void p.openSyncNote()));
 			menu.addItem((i) => i.setTitle("Full resync").setIcon("refresh-ccw").onClick(() => void p.syncNow(true)));
 			menu.addItem((i) => i.setTitle("Settings").setIcon("settings").onClick(() => this.openSettings()));
 			menu.showAtMouseEvent(e);

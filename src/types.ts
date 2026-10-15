@@ -81,19 +81,37 @@ export interface DateFilter {
 
 export type Grouping = "list" | "date" | "status";
 
+/** Card order inside board columns. "date" is the completion date for completed tasks, otherwise the due date. */
+export type BoardSort = "default" | "dateAsc" | "dateDesc";
+
+/** Built-in gift sounds, "random" (one of them each time) or "custom" (an audio file from the vault). */
+export type GiftSound = "birthday" | "chime" | "magic" | "random" | "custom";
+
 export interface TaskGiftSettings {
 	clientId: string;
 	clientSecret: string;
-	notePath: string;
-	mirrorToNote: boolean;
 	syncIntervalMinutes: number;
 	keepCompletedDays: number;
 	giftMode: boolean;
 	tasksPerGift: number;
 	showGiftCounter: boolean;
 	animations: boolean;
+	giftSoundEnabled: boolean;
+	giftSound: GiftSound;
+	/** Vault path of the audio file used when giftSound is "custom". */
+	giftSoundFile: string;
+	/** 0..100 */
+	giftSoundVolume: number;
+	/** Vault paths of images that can be shown behind gift mode. */
+	giftBackgrounds: string[];
+	/** "random" (a different image per gift) or one path from giftBackgrounds. */
+	giftBackgroundPick: string;
+	/** How much the background image is faded towards the theme background, 0..90. */
+	giftBackgroundDim: number;
 	grouping: Grouping;
 	showCompleted: boolean;
+	/** Card order per board column, keyed by column (list ID, "today", "completed", …). Missing = default. */
+	columnSort: Record<string, BoardSort>;
 	weekStart: 0 | 1;
 	boardFilter: DateFilter;
 	separateGiftFilter: boolean;
@@ -119,6 +137,8 @@ export interface GiftState {
 	opened: boolean;
 	/** Tasks shown just before a redraw, avoided on the next draw. */
 	recent: string[];
+	/** Slots put back with "Draw again", refilled when the re-wrapped gift is opened. */
+	pendingRedraw: number;
 	openedTodayDate: string;
 	openedTodayCount: number;
 }
@@ -133,8 +153,6 @@ export interface StoreData {
 	times: Record<string, string>;
 	/** Task IDs that already spawned their next occurrence. */
 	spawned: Record<string, string>;
-	/** Task IDs rendered in the note on the last write. */
-	renderedIds: string[];
 	/** Temporary local IDs that were replaced by Google IDs (old -> new). */
 	aliases: Record<string, string>;
 	lastSyncAt: string | null;

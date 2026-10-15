@@ -1,14 +1,14 @@
 import { debounce, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { TasksApi } from "./api/client";
+import { SOUND_LABELS } from "./audio/sounds";
 import { AuthError, refresh, revoke } from "./auth/oauth";
-import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, VIEW_TYPE } from "./defaults";
+import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, VIEW_TYPE } from "./defaults";
 import { ConfirmModal } from "./modals/ConfirmModal";
 import { ConnectModal } from "./modals/ConnectModal";
 import { LoginModal } from "./modals/LoginModal";
 import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
 import { SyncEngine, SyncStatus } from "./sync/engine";
-import { NoteMirror } from "./sync/note";
 import { ChangeSource, TaskStore } from "./sync/store";
 import { DataFile, DEFAULT_DATA_PATH, normalizeDataPath, parse as parseDataFile } from "./storage/dataFile";
 import type { AuthData, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
@@ -20,7 +20,6 @@ interface LocalPointer {
 import { TaskView } from "./views/TaskView";
 
 const LOCAL_SYNC_DEBOUNCE_MS = 1500;
-const NOTE_INGEST_DEBOUNCE_MS = 2500;
 const OFFLINE_RETRY_MS = 60 * 1000;
 
 export default class TaskGiftPlugin extends Plugin {
@@ -29,7 +28,6 @@ export default class TaskGiftPlugin extends Plugin {
 	store!: TaskStore;
 	api!: TasksApi;
 	engine!: SyncEngine;
-	mirror!: NoteMirror;
 	private dataFile!: DataFile;
 
 	private intervalId: number | null = null;
@@ -41,22 +39,14 @@ export default class TaskGiftPlugin extends Plugin {
 	private saveSoon = debounce(() => void this.persist(), 1000, true);
 	private refreshViewsSoon = debounce(() => this.refreshViews(), 100, true);
 	private syncSoon = debounce(() => void this.engine.sync(), LOCAL_SYNC_DEBOUNCE_MS, true);
-	private ingestSoon = debounce(() => void this.ingestNote(), NOTE_INGEST_DEBOUNCE_MS, true);
 
 	async onload(): Promise<void> {
 		await this.loadPluginData();
 
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
 		this.api = new TasksApi(() => this.accessToken());
-		this.mirror = new NoteMirror(this.app, this.store, () => this.settings, (titles) => this.confirmMassDelete(titles));
 		this.engine = new SyncEngine(this.api, this.store, () => this.settings, () => this.auth !== null, {
-			beforeSync: async () => {
-				await this.mirror.ingest();
-			},
-			afterSync: async () => {
-				await this.mirror.render();
-				await this.persist();
-			},
+			afterSync: () => this.persist(),
 			onStatus: (s) => this.onSyncStatus(s),
 			onError: (msg) => this.showError(msg),
 		});
@@ -66,24 +56,22 @@ export default class TaskGiftPlugin extends Plugin {
 		this.addRibbonIcon("gift", "Open Task Gift", () => void this.activateView());
 		this.addRibbonIcon("list-plus", "New Google task", () => this.openTaskModal());
 
-		this.addCommand({ id: "open-view", name: "Open Task Gift", callback: () => void this.activateView() });
+		this.addCommand({ id: "open-view", name: "Open board", callback: () => void this.activateView() });
 		this.addCommand({ id: "new-task", name: "New task", callback: () => this.openTaskModal() });
 		this.addCommand({ id: "sync-now", name: "Sync now", callback: () => void this.syncNow() });
 		this.addCommand({ id: "full-resync", name: "Full resync with Google", callback: () => void this.syncNow(true) });
+		this.addCommand({ id: "sync-all-completed", name: "Download all completed tasks from Google", callback: () => void this.syncAllCompleted() });
 		this.addCommand({
 			id: "toggle-gift-mode",
 			name: "Toggle gift mode (hide task board)",
 			callback: () => void this.setGiftMode(!this.settings.giftMode),
 		});
-		this.addCommand({ id: "open-sync-note", name: "Open sync note", callback: () => void this.openSyncNote() });
 
 		this.addSettingTab(new TaskGiftSettingTab(this.app, this));
 
 		this.registerEvent(
 			this.app.vault.on("modify", (file: TAbstractFile) => {
-				if (!(file instanceof TFile)) return;
-				if (this.mirror.isMirrorFile(file)) this.ingestSoon();
-				else if (this.dataFile.isDataFile(file)) void this.onDataFileChanged();
+				if (file instanceof TFile && this.dataFile.isDataFile(file)) void this.onDataFileChanged();
 			}),
 		);
 		this.registerEvent(
@@ -118,6 +106,18 @@ export default class TaskGiftPlugin extends Plugin {
 		s.boardFilter = Object.assign({}, DEFAULT_SETTINGS.boardFilter, raw?.boardFilter ?? {});
 		s.giftFilter = Object.assign({}, DEFAULT_SETTINGS.giftFilter, raw?.giftFilter ?? {});
 		if (!Array.isArray(s.giftExcludeKeywords)) s.giftExcludeKeywords = [];
+		if (!(s.giftSound in SOUND_LABELS)) s.giftSound = DEFAULT_SETTINGS.giftSound;
+		// Older versions had a single background image.
+		const legacyBg = (raw as { giftBackground?: string } | undefined)?.giftBackground;
+		s.giftBackgrounds = Array.isArray(s.giftBackgrounds) ? [...s.giftBackgrounds] : [];
+		if (legacyBg && !s.giftBackgrounds.includes(legacyBg)) {
+			s.giftBackgrounds.push(legacyBg);
+			s.giftBackgroundPick = legacyBg;
+		}
+		delete (s as { giftBackground?: string }).giftBackground;
+		// Removed settings: the markdown sync note and the board-wide sort.
+		for (const key of ["notePath", "mirrorToNote", "boardSort"]) delete (s as unknown as Record<string, unknown>)[key];
+		s.columnSort = Object.assign({}, raw?.columnSort ?? {});
 		if (!KEEP_COMPLETED_OPTIONS.includes(s.keepCompletedDays)) {
 			// Snap older free-form values to the nearest allowed option at or above them.
 			s.keepCompletedDays = KEEP_COMPLETED_OPTIONS.find((n) => n >= s.keepCompletedDays) ?? 30;
@@ -128,6 +128,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private static mergeStore(raw: Partial<StoreData> | undefined): StoreData {
 		const store = Object.assign(emptyStore(), raw ?? {});
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
+		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
 		return store;
 	}
 
@@ -142,8 +143,7 @@ export default class TaskGiftPlugin extends Plugin {
 		let data = await this.dataFile.read();
 		if (!data && (local.settings || local.store)) {
 			// Migrate from the old data.json format.
-			data = { settings: local.settings, auth: local.auth, store: local.store } as Partial<PluginData>;
-			console.info("[Task Gift] Migrating data.json into", this.dataFile.path);
+			data = { settings: local.settings, auth: local.auth, store: local.store };
 		}
 		this.dataFileMissing = !(await this.dataFile.exists());
 		this.settings = TaskGiftPlugin.mergeSettings(data?.settings);
@@ -156,7 +156,6 @@ export default class TaskGiftPlugin extends Plugin {
 		if (this.dataFileMissing) {
 			const found = this.dataFile.findInVault();
 			if (found) {
-				console.info("[Task Gift] Found data note at", found);
 				this.dataFile.path = found;
 				const data = await this.dataFile.read();
 				if (data) this.applyExternal(data, true);
@@ -186,10 +185,6 @@ export default class TaskGiftPlugin extends Plugin {
 	async changeDataFilePath(input: string): Promise<boolean> {
 		const target = normalizeDataPath(input);
 		if (target === this.dataFile.path) return true;
-		if (target === this.mirror.path()) {
-			new Notice("The data file can't be the same as the sync note.");
-			return false;
-		}
 		if (await this.dataFile.exists(target)) {
 			const existing = await this.dataFile.read(target);
 			if (!existing) {
@@ -261,7 +256,6 @@ export default class TaskGiftPlugin extends Plugin {
 		if (raw === null || this.dataFile.isOwnWrite(raw)) return;
 		const data = parseDataFile(raw);
 		if (!data) return;
-		console.info("[Task Gift] Data file changed on another device; merging.");
 		this.applyExternal(data, false);
 	}
 
@@ -279,7 +273,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private onStoreChange(source: ChangeSource): void {
 		this.saveSoon();
 		this.refreshViewsSoon();
-		if (source === "local" || source === "note") this.syncSoon();
+		if (source === "local") this.syncSoon();
 	}
 
 	// ------------------------------------------------------------ auth
@@ -394,6 +388,23 @@ export default class TaskGiftPlugin extends Plugin {
 		if (this.engine.status.state === "idle") new Notice("Google Tasks synced.");
 	}
 
+	/** Keeps completed tasks forever and downloads every completed task from Google. */
+	async syncAllCompleted(): Promise<void> {
+		if (!this.auth) {
+			new Notice("Connect your Google account in Task Gift settings first.");
+			return;
+		}
+		this.settings.keepCompletedDays = KEEP_FOREVER;
+		await this.saveSettings();
+		new Notice("Downloading all completed tasks from Google…");
+		this.lastErrorNotice = "";
+		await this.engine.sync(true);
+		if (this.engine.status.state === "idle") {
+			const count = this.store.all().filter((t) => t.status === "completed").length;
+			new Notice(`Done: ${count} completed task(s) are now kept locally.`);
+		}
+	}
+
 	restartInterval(): void {
 		if (this.intervalId !== null) window.clearInterval(this.intervalId);
 		const minutes = Math.max(1, this.settings.syncIntervalMinutes || 5);
@@ -402,19 +413,6 @@ export default class TaskGiftPlugin extends Plugin {
 				if (this.auth) void this.engine.sync();
 			}, minutes * 60 * 1000),
 		);
-	}
-
-	private async ingestNote(): Promise<void> {
-		if (this.engine.isRunning()) {
-			// The note is rewritten at the end of a sync; read user edits after that.
-			this.ingestSoon();
-			return;
-		}
-		try {
-			await this.mirror.ingest();
-		} catch (e) {
-			console.error("[Task Gift] Could not read sync note", e);
-		}
 	}
 
 	private onSyncStatus(s: SyncStatus): void {
@@ -439,19 +437,6 @@ export default class TaskGiftPlugin extends Plugin {
 		if (msg === this.lastErrorNotice) return;
 		this.lastErrorNotice = msg;
 		new Notice(`Task Gift: ${msg}`, 8000);
-	}
-
-	private confirmMassDelete(titles: string[]): Promise<boolean> {
-		return new Promise((resolve) => {
-			new ConfirmModal(
-				this.app,
-				"Delete tasks from Google?",
-				[`${titles.length} tasks are missing from the sync note. Delete them from Google Tasks? Cancel restores them in the note.`, ...titles],
-				"Delete",
-				() => resolve(true),
-				() => resolve(false),
-			).open();
-		});
 	}
 
 	// ------------------------------------------------------------ UI
@@ -480,11 +465,5 @@ export default class TaskGiftPlugin extends Plugin {
 			await leaf.setViewState({ type: VIEW_TYPE, active: true });
 		}
 		await workspace.revealLeaf(leaf);
-	}
-
-	async openSyncNote(): Promise<void> {
-		const file = this.app.vault.getAbstractFileByPath(this.mirror.path());
-		if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
-		else new Notice("The sync note doesn't exist yet. Sync first.");
 	}
 }

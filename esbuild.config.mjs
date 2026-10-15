@@ -29,6 +29,8 @@ const ctx = await esbuild.context({
   sourcemap: prod ? false : "inline",
   treeShaking: true,
   outfile: "main.js",
+  // Built-in sounds are embedded in main.js: a release only ships main.js, manifest.json and styles.css.
+  loader: { ".mp3": "dataurl" },
 });
 
 if (prod) {

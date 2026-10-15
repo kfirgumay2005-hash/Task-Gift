@@ -1,6 +1,34 @@
 import { Platform, requestUrl } from "obsidian";
-import type { Server, IncomingMessage, ServerResponse } from "http";
 import type { AuthData } from "../types";
+
+/** The parts of Node's http module used for the loopback redirect (desktop only). */
+interface LoopbackRequest {
+	url?: string;
+}
+interface LoopbackResponse {
+	writeHead(status: number, headers?: Record<string, string>): void;
+	end(body?: string): void;
+}
+interface LoopbackServer {
+	on(event: "error", cb: (err: Error) => void): void;
+	listen(port: number, host: string, cb?: () => void): void;
+	address(): { port: number } | string | null;
+	close(): void;
+}
+interface HttpModule {
+	createServer(handler: (req: LoopbackRequest, res: LoopbackResponse) => void): LoopbackServer;
+}
+
+/**
+ * Loads Node's http module lazily, only in the desktop app, so the plugin still loads on mobile.
+ * Goes through Electron's window.require: a bundled import() of a Node built-in doesn't resolve in the renderer.
+ */
+async function loadHttp(): Promise<HttpModule> {
+	if (!Platform.isDesktop || !Platform.isDesktopApp) throw new AuthError("Not available on mobile.");
+	const nodeRequire = (window as unknown as { require?: (id: string) => unknown }).require;
+	if (!nodeRequire) throw new AuthError("Automatic sign-in isn't available here. Use the manual sign-in instead.");
+	return nodeRequire("http") as HttpModule;
+}
 
 const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
@@ -44,7 +72,7 @@ function emailFromIdToken(idToken: string | undefined): string {
 	if (!idToken) return "";
 	try {
 		const payload = idToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-		const json = JSON.parse(decodeURIComponent(escape(atob(payload)))) as { email?: string };
+		const json = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload), (c) => c.charCodeAt(0)))) as { email?: string };
 		return json.email ?? "";
 	} catch {
 		return "";
@@ -167,11 +195,10 @@ export function openInBrowser(url: string): void {
  * is caught automatically (no copy-paste needed). Rejects if the port is busy or on abort;
  * the user can then still paste the address.
  */
-export function catchRedirect(port: number, expectedState: string, signal: AbortSignal): Promise<string> {
-	if (!Platform.isDesktopApp) return Promise.reject(new AuthError("Not available on mobile."));
-	const http = require("http") as typeof import("http");
+export async function catchRedirect(port: number, expectedState: string, signal: AbortSignal): Promise<string> {
+	const http = await loadHttp();
 	return new Promise<string>((resolve, reject) => {
-		const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+		const server = http.createServer((req: LoopbackRequest, res: LoopbackResponse) => {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
 			const code = url.searchParams.get("code");
 			const error = url.searchParams.get("error");
@@ -216,9 +243,9 @@ export interface LoginOptions {
 export async function login(clientId: string, clientSecret: string, opts: LoginOptions = {}): Promise<AuthData> {
 	if (!Platform.isDesktopApp) throw new AuthError("Automatic sign-in needs the desktop app. Use the manual sign-in instead.");
 	checkCredentials(clientId, clientSecret);
-	const http = require("http") as typeof import("http");
+	const http = await loadHttp();
 
-	let server: Server | null = null;
+	let server: LoopbackServer | null = null;
 	let session: AuthSession | null = null;
 	const codePromise = new Promise<string>((resolve, reject) => {
 		const timer = window.setTimeout(() => reject(new AuthError("Sign-in timed out. Please try again.")), LOGIN_TIMEOUT_MS);
@@ -227,7 +254,7 @@ export async function login(clientId: string, clientSecret: string, opts: LoginO
 			reject(new AuthError("Sign-in cancelled."));
 		});
 
-		server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+		server = http.createServer((req: LoopbackRequest, res: LoopbackResponse) => {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
 			const code = url.searchParams.get("code");
 			const error = url.searchParams.get("error");
@@ -275,7 +302,7 @@ export async function login(clientId: string, clientSecret: string, opts: LoginO
 		const code = await codePromise;
 		return await exchangeCode(session as unknown as AuthSession, code, clientId, clientSecret);
 	} finally {
-		(server as Server | null)?.close();
+		(server as LoopbackServer | null)?.close();
 	}
 }
 

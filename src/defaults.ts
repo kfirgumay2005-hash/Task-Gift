@@ -18,22 +18,31 @@ export const DEFAULT_GIFT_FILTER: DateFilter = {
 	includeNoDate: true,
 };
 
-/** Allowed values for "Keep completed tasks" (0 = never). */
-export const KEEP_COMPLETED_OPTIONS = [0, 1, 3, 7, 30];
+/** "Keep completed tasks" value meaning no time limit. */
+export const KEEP_FOREVER = -1;
+
+/** Allowed values for "Keep completed tasks" (0 = never, KEEP_FOREVER = no limit). */
+export const KEEP_COMPLETED_OPTIONS = [0, 1, 3, 7, 30, 90, 365, KEEP_FOREVER];
 
 export const DEFAULT_SETTINGS: TaskGiftSettings = {
 	clientId: "",
 	clientSecret: "",
-	notePath: "Tasks/Google Tasks.md",
-	mirrorToNote: true,
 	syncIntervalMinutes: 5,
 	keepCompletedDays: 30,
 	giftMode: false,
 	tasksPerGift: 1,
 	showGiftCounter: true,
 	animations: true,
+	giftSoundEnabled: true,
+	giftSound: "birthday",
+	giftSoundFile: "",
+	giftSoundVolume: 70,
+	giftBackgrounds: [],
+	giftBackgroundPick: "random",
+	giftBackgroundDim: 40,
 	grouping: "list",
 	showCompleted: false,
+	columnSort: {},
 	weekStart: 0,
 	boardFilter: DEFAULT_BOARD_FILTER,
 	separateGiftFilter: false,
@@ -43,7 +52,7 @@ export const DEFAULT_SETTINGS: TaskGiftSettings = {
 };
 
 export function emptyGiftState(): GiftState {
-	return { drawn: [], done: [], opened: false, recent: [], openedTodayDate: "", openedTodayCount: 0 };
+	return { drawn: [], done: [], opened: false, recent: [], pendingRedraw: 0, openedTodayDate: "", openedTodayCount: 0 };
 }
 
 export function emptyStore(): StoreData {
@@ -54,7 +63,6 @@ export function emptyStore(): StoreData {
 		recurrence: {},
 		times: {},
 		spawned: {},
-		renderedIds: [],
 		aliases: {},
 		lastSyncAt: null,
 		lastFullSyncAt: null,

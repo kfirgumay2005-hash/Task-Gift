@@ -1,5 +1,6 @@
 import { ApiError, GoogleTask, NetworkError, TasksApi, TaskWrite } from "../api/client";
 import { AuthError } from "../auth/oauth";
+import { KEEP_FOREVER } from "../defaults";
 import type { Task, TaskGiftSettings } from "../types";
 import { fromGoogleDue, toGoogleDue } from "../util/dates";
 import { isLocalId, newLocalId, TaskStore } from "./store";
@@ -14,9 +15,7 @@ export interface SyncStatus {
 }
 
 export interface SyncHooks {
-	/** Called before pushing, e.g. to read local note edits. */
-	beforeSync(): Promise<void>;
-	/** Always called at the end, e.g. to rewrite the note. */
+	/** Always called at the end, e.g. to save the data note. */
 	afterSync(): Promise<void>;
 	onStatus(status: SyncStatus): void;
 	onError(message: string): void;
@@ -24,10 +23,6 @@ export interface SyncHooks {
 
 const FULL_SYNC_EVERY_MS = 6 * 60 * 60 * 1000;
 const UPDATED_MIN_MARGIN_MS = 2 * 60 * 1000;
-
-function log(...args: unknown[]): void {
-	console.log("[Task Gift]", ...args);
-}
 
 function warn(...args: unknown[]): void {
 	console.warn("[Task Gift]", ...args);
@@ -85,7 +80,6 @@ export class SyncEngine {
 
 	private async run(full: boolean): Promise<void> {
 		try {
-			await this.hooks.beforeSync();
 			if (!this.isConnected()) {
 				this.setStatus("disconnected", "Not connected");
 				return;
@@ -94,7 +88,7 @@ export class SyncEngine {
 			// Pull first so conflicts are detected before anything local is pushed.
 			await this.pull(full);
 			await this.push();
-			this.store.prune(this.settings().keepCompletedDays);
+			if (this.settings().keepCompletedDays !== KEEP_FOREVER) this.store.prune(this.settings().keepCompletedDays);
 			this.setStatus("idle", "Synced");
 		} catch (e) {
 			if (e instanceof NetworkError) {
@@ -143,7 +137,9 @@ export class SyncEngine {
 			}
 		}
 
-		const cutoff = new Date(Date.now() - this.settings().keepCompletedDays * 86400000).toISOString();
+		// No cutoff when completed tasks are kept forever: every completed task in Google is downloaded.
+		const keep = this.settings().keepCompletedDays;
+		const cutoff = keep === KEEP_FOREVER ? undefined : new Date(Date.now() - keep * 86400000).toISOString();
 		for (const list of remoteLists) {
 			if (full || newLists.has(list.id)) {
 				const open = await this.api.listTasks(list.id, { showCompleted: false, showHidden: false });
@@ -157,7 +153,7 @@ export class SyncEngine {
 				// Anything we know in this list that Google no longer returned was deleted remotely.
 				for (const t of Object.values(data.tasks)) {
 					if (isLocalId(t.id) || seen.has(t.id) || (t.remoteListId ?? t.listId) !== list.id) continue;
-					if (t.status === "completed" && t.completed && t.completed < cutoff && !t.dirty) continue;
+					if (cutoff && t.status === "completed" && t.completed && t.completed < cutoff && !t.dirty) continue;
 					this.handleRemoteDeletion(t);
 				}
 			} else {
@@ -291,8 +287,6 @@ export class SyncEngine {
 		const data = this.store.data;
 		const dirty = Object.values(data.tasks).filter((t) => t.dirty);
 		if (!dirty.length) return;
-		log(`Pushing ${dirty.length} change(s)`);
-
 		// 1. Deletions
 		for (const t of dirty.filter((x) => x.pendingDelete)) {
 			try {
