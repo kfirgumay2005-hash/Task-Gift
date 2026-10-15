@@ -1,0 +1,255 @@
+import type { RecurrenceRule, StoreData, Task, TaskList } from "../types";
+import { nextOccurrence } from "../recurrence/rule";
+import { today } from "../util/dates";
+
+export const LOCAL_PREFIX = "local-";
+
+export function isLocalId(id: string): boolean {
+	return id.startsWith(LOCAL_PREFIX);
+}
+
+export function newLocalId(): string {
+	return LOCAL_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+export interface TaskFields {
+	title: string;
+	notes?: string;
+	listId: string;
+	due?: string | null;
+	parent?: string | null;
+	status?: Task["status"];
+}
+
+export interface TaskEdit {
+	title?: string;
+	notes?: string;
+	listId?: string;
+	due?: string | null;
+	parent?: string | null;
+	/** undefined = unchanged, null = clear. */
+	time?: string | null;
+	recurrence?: RecurrenceRule | null;
+}
+
+export type ChangeSource = "local" | "note" | "remote";
+
+/**
+ * Holds all task state and is the only place that mutates it.
+ * Every local mutation marks the task dirty so the sync engine pushes it.
+ */
+export class TaskStore {
+	constructor(public data: StoreData, private readonly onChange: (source: ChangeSource) => void) {}
+
+	notify(source: ChangeSource): void {
+		this.onChange(source);
+	}
+
+	get(id: string): Task | undefined {
+		const t = this.data.tasks[id] ?? this.data.tasks[this.resolveAlias(id)];
+		return t && !t.pendingDelete ? t : undefined;
+	}
+
+	resolveAlias(id: string): string {
+		let cur = id;
+		for (let i = 0; i < 5 && this.data.aliases[cur]; i++) cur = this.data.aliases[cur];
+		return cur;
+	}
+
+	/** All visible (not pending deletion) tasks. */
+	all(): Task[] {
+		return Object.values(this.data.tasks).filter((t) => !t.pendingDelete);
+	}
+
+	lists(): TaskList[] {
+		return Object.values(this.data.lists).sort((a, b) => a.title.localeCompare(b.title));
+	}
+
+	listTitle(id: string): string {
+		return this.data.lists[id]?.title ?? "Unknown list";
+	}
+
+	defaultListId(): string | null {
+		return this.lists()[0]?.id ?? null;
+	}
+
+	time(id: string): string | null {
+		return this.data.times[id] ?? null;
+	}
+
+	rule(id: string): RecurrenceRule | null {
+		return this.data.recurrence[id] ?? null;
+	}
+
+	children(id: string): Task[] {
+		return this.all().filter((t) => t.parent === id);
+	}
+
+	create(fields: TaskFields, source: ChangeSource = "local", silent = false): Task {
+		const id = newLocalId();
+		const status = fields.status ?? "needsAction";
+		const task: Task = {
+			id,
+			listId: fields.listId,
+			title: fields.title,
+			notes: fields.notes ?? "",
+			due: fields.due ?? null,
+			status,
+			completed: status === "completed" ? new Date().toISOString() : null,
+			parent: fields.parent ?? null,
+			position: "~",
+			updated: "",
+			remoteListId: null,
+			remoteParent: null,
+			dirty: true,
+			localUpdated: Date.now(),
+			pendingDelete: false,
+		};
+		this.data.tasks[id] = task;
+		if (!silent) this.notify(source);
+		return task;
+	}
+
+	update(id: string, edit: TaskEdit, source: ChangeSource = "local"): void {
+		const task = this.get(id);
+		if (!task) return;
+		let changed = false;
+		const set = <K extends keyof Task>(k: K, v: Task[K]) => {
+			if (task[k] !== v) {
+				task[k] = v;
+				changed = true;
+			}
+		};
+		if (edit.title !== undefined) set("title", edit.title);
+		if (edit.notes !== undefined) set("notes", edit.notes);
+		if (edit.due !== undefined) set("due", edit.due);
+		if (edit.listId !== undefined && edit.listId !== task.listId) {
+			set("listId", edit.listId);
+			// Subtasks follow their parent; a moved subtask becomes top-level.
+			if (edit.parent === undefined) set("parent", null);
+			for (const child of this.children(task.id)) {
+				child.listId = edit.listId;
+			}
+		}
+		if (edit.parent !== undefined) set("parent", edit.parent);
+		if (changed) {
+			task.dirty = true;
+			task.localUpdated = Date.now();
+		}
+		if (edit.time !== undefined) {
+			if (edit.time) this.data.times[task.id] = edit.time;
+			else delete this.data.times[task.id];
+			changed = true;
+		}
+		if (edit.recurrence !== undefined) {
+			if (edit.recurrence) {
+				this.data.recurrence[task.id] = edit.recurrence;
+				if (task.status !== "completed") delete this.data.spawned[task.id];
+			} else delete this.data.recurrence[task.id];
+			changed = true;
+		}
+		if (changed) this.notify(source);
+	}
+
+	setCompleted(id: string, done: boolean, source: ChangeSource = "local"): void {
+		const task = this.get(id);
+		if (!task) return;
+		const status = done ? "completed" : "needsAction";
+		if (task.status === status) return;
+		task.status = status;
+		task.completed = done ? new Date().toISOString() : null;
+		task.dirty = true;
+		task.localUpdated = Date.now();
+		if (done) this.maybeSpawnNext(task);
+		this.notify(source);
+	}
+
+	delete(id: string, source: ChangeSource = "local"): void {
+		const task = this.get(id);
+		if (!task) return;
+		const ids = [task.id, ...this.children(task.id).map((c) => c.id)];
+		for (const tid of ids) {
+			const t = this.data.tasks[tid];
+			if (isLocalId(tid)) this.forget(tid);
+			else {
+				t.pendingDelete = true;
+				t.dirty = true;
+				t.localUpdated = Date.now();
+			}
+		}
+		this.notify(source);
+	}
+
+	/** Removes a task and all side data from the store. */
+	forget(id: string): void {
+		delete this.data.tasks[id];
+		delete this.data.snapshots[id];
+		delete this.data.recurrence[id];
+		delete this.data.times[id];
+		delete this.data.spawned[id];
+	}
+
+	/** Replaces a (temporary) ID everywhere. */
+	remap(oldId: string, newId: string): void {
+		if (oldId === newId) return;
+		const task = this.data.tasks[oldId];
+		if (task) {
+			task.id = newId;
+			this.data.tasks[newId] = task;
+			delete this.data.tasks[oldId];
+		}
+		for (const t of Object.values(this.data.tasks)) if (t.parent === oldId) t.parent = newId;
+		const moveKey = <T>(rec: Record<string, T>) => {
+			if (oldId in rec) {
+				rec[newId] = rec[oldId];
+				delete rec[oldId];
+			}
+		};
+		moveKey(this.data.recurrence);
+		moveKey(this.data.times);
+		moveKey(this.data.spawned);
+		moveKey(this.data.snapshots);
+		for (const [k, v] of Object.entries(this.data.spawned)) if (v === oldId) this.data.spawned[k] = newId;
+		const g = this.data.gift;
+		g.drawn = g.drawn.map((x) => (x === oldId ? newId : x));
+		g.done = g.done.map((x) => (x === oldId ? newId : x));
+		g.recent = g.recent.map((x) => (x === oldId ? newId : x));
+		this.data.renderedIds = this.data.renderedIds.map((x) => (x === oldId ? newId : x));
+		this.data.aliases[oldId] = newId;
+		const keys = Object.keys(this.data.aliases);
+		if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete this.data.aliases[k];
+	}
+
+	/** When a recurring task is completed, create its next occurrence (once). */
+	maybeSpawnNext(task: Task): void {
+		const rule = this.data.recurrence[task.id];
+		if (!rule || this.data.spawned[task.id]) return;
+		const next = nextOccurrence(rule, task.due ?? today());
+		if (!next) {
+			this.data.spawned[task.id] = "end";
+			return;
+		}
+		const created = this.create(
+			{ title: task.title, notes: task.notes, listId: task.listId, due: next.due, parent: task.parent },
+			"local",
+			true,
+		);
+		this.data.recurrence[created.id] = next.rule;
+		const time = this.data.times[task.id];
+		if (time) this.data.times[created.id] = time;
+		this.data.spawned[task.id] = created.id;
+		console.info(`[Task Gift] Recurring task "${task.title}" completed; next occurrence on ${next.due}.`);
+	}
+
+	/** Drops old completed tasks from local state (they stay in Google). */
+	prune(keepDays: number): void {
+		const cutoff = Date.now() - keepDays * 86400000;
+		for (const t of Object.values(this.data.tasks)) {
+			if (t.dirty || t.status !== "completed" || !t.completed) continue;
+			if (Date.parse(t.completed) < cutoff && !this.data.gift.drawn.includes(t.id)) this.forget(t.id);
+		}
+		for (const [k, v] of Object.entries(this.data.spawned)) {
+			if (!this.data.tasks[k] && (v === "end" || !this.data.tasks[v])) delete this.data.spawned[k];
+		}
+	}
+}
