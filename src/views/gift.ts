@@ -351,6 +351,7 @@ export class GiftController {
 			const shape = CONFETTI_SHAPES[i % CONFETTI_SHAPES.length];
 			const piece = layer.createSpan({ cls: "tg-confetti-piece" });
 			if (shape) piece.addClass(shape);
+			if (shape === "is-star") piece.setText("★");
 			const angle = rand(-Math.PI * 0.95, -Math.PI * 0.05); // mostly upward
 			const dist = rand(110, 300);
 			piece.style.setProperty("--tg-x", `${Math.cos(angle) * dist}px`);
