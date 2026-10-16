@@ -88,7 +88,8 @@ The Google Tasks API **cannot create recurring tasks** and **stores dates only, 
 - The repeat rule and the time are stored in the Task Gift data note, keyed by task ID, and shown on cards.
 - When a repeating task is completed, from anywhere (board, gift, or the Google Tasks app, picked up on the next sync), Task Gift creates the **next occurrence** in Google with the next due date and moves the rule to it. Ends "after N occurrences" and "on date" are honoured.
 - Google's apps only see ordinary one-off tasks with a date. If Obsidian isn't running, the next occurrence is created on the next sync.
-- Repeat rules created in the Google Tasks app itself can't be read through the API. Those tasks show up as ordinary tasks.
+- If a repeating task was overdue when you complete it, missed occurrences are skipped: the next one is due today or later (they still count towards an "after N occurrences" end).
+- **Repeating tasks created in Google Calendar or the Google Tasks app are not visible to Task Gift.** The Google Tasks API doesn't return them at all, and the Google Calendar API doesn't expose tasks either, so an extra API key can't help. Recreate them in Task Gift with *Repeat* in the task modal (and delete the Google version to avoid duplicates). Task Gift then puts each occurrence into Google, so it still appears in Calendar and on your phone.
 
 ## Sync details
 

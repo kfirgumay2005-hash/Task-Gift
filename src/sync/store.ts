@@ -223,7 +223,7 @@ export class TaskStore {
 	maybeSpawnNext(task: Task): void {
 		const rule = this.data.recurrence[task.id];
 		if (!rule || this.data.spawned[task.id]) return;
-		const next = nextOccurrence(rule, task.due ?? today());
+		const next = nextOccurrence(rule, task.due ?? today(), today());
 		if (!next) {
 			this.data.spawned[task.id] = "end";
 			return;

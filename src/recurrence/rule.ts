@@ -87,12 +87,25 @@ export function computeNext(rule: RecurrenceRule, from: string): string {
 	}
 }
 
-/** Returns the next occurrence's due date and rule, or null if the series has ended. */
-export function nextOccurrence(rule: RecurrenceRule, currentDue: string): { due: string; rule: RecurrenceRule } | null {
-	const due = computeNext(rule, currentDue);
-	const occurrence = rule.occurrence + 1;
-	if (rule.end.type === "count" && occurrence > rule.end.count) return null;
-	if (rule.end.type === "until" && due > rule.end.date) return null;
+/**
+ * Returns the next occurrence's due date and rule, or null if the series has ended.
+ * Occurrences before `notBefore` (missed while the task was overdue) are skipped, but still
+ * count towards an "after N occurrences" end, like in Google Calendar.
+ */
+export function nextOccurrence(
+	rule: RecurrenceRule,
+	currentDue: string,
+	notBefore?: string,
+): { due: string; rule: RecurrenceRule } | null {
+	let due = currentDue;
+	let occurrence = rule.occurrence;
+	for (let i = 0; i < 10000; i++) {
+		due = computeNext(rule, due);
+		occurrence++;
+		if (rule.end.type === "count" && occurrence > rule.end.count) return null;
+		if (rule.end.type === "until" && due > rule.end.date) return null;
+		if (!notBefore || due >= notBefore) break;
+	}
 	return { due, rule: { ...rule, occurrence } };
 }
 
