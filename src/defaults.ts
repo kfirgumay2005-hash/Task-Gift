@@ -2,21 +2,18 @@ import type { DateFilter, GiftState, StoreData, TaskGiftSettings } from "./types
 
 export const VIEW_TYPE = "task-gift-view";
 
-export const DEFAULT_BOARD_FILTER: DateFilter = {
-	presets: ["all"],
-	customFrom: 1,
-	customTo: 7,
-	includeOverdue: true,
-	includeNoDate: true,
-};
-
-export const DEFAULT_GIFT_FILTER: DateFilter = {
+export const DEFAULT_MODE_FILTER: DateFilter = {
 	presets: ["today"],
 	customFrom: 1,
 	customTo: 7,
 	includeOverdue: true,
 	includeNoDate: true,
 };
+
+/** Board zoom steps in percent. */
+export const BOARD_ZOOM_MIN = 50;
+export const BOARD_ZOOM_MAX = 150;
+export const BOARD_ZOOM_STEP = 10;
 
 /** "Keep completed tasks" value meaning no time limit. */
 export const KEEP_FOREVER = -1;
@@ -37,18 +34,21 @@ export const DEFAULT_SETTINGS: TaskGiftSettings = {
 	giftSound: "birthday",
 	giftSoundFile: "",
 	giftSoundVolume: 70,
-	giftBackgrounds: [],
-	giftBackgroundPick: "random",
-	giftBackgroundDim: 40,
 	grouping: "list",
 	showCompleted: false,
 	columnSort: {},
 	weekStart: 0,
-	boardFilter: DEFAULT_BOARD_FILTER,
-	separateGiftFilter: false,
-	giftFilter: DEFAULT_GIFT_FILTER,
-	includedLists: null,
-	giftExcludeKeywords: [],
+	// Filled with one default mode on load.
+	modes: [],
+	activeModeId: "",
+	victoryAnimation: true,
+	victorySoundEnabled: false,
+	victorySoundFile: "",
+	giftMusicEnabled: false,
+	giftMusicFile: "",
+	giftMusicVolume: 40,
+	giftVideoSound: false,
+	boardZoom: 100,
 };
 
 export function emptyGiftState(): GiftState {

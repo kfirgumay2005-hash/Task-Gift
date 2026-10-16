@@ -1,5 +1,6 @@
 import { debounce, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { TasksApi } from "./api/client";
+import { GiftMusic } from "./audio/music";
 import { SOUND_LABELS } from "./audio/sounds";
 import { AuthError, refresh, revoke } from "./auth/oauth";
 import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, VIEW_TYPE } from "./defaults";
@@ -10,6 +11,7 @@ import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
 import { SyncEngine, SyncStatus } from "./sync/engine";
 import { ChangeSource, TaskStore } from "./sync/store";
+import { normalizeModes } from "./modes";
 import { DataFile, DEFAULT_DATA_PATH, normalizeDataPath, parse as parseDataFile } from "./storage/dataFile";
 import type { AuthData, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
 
@@ -29,6 +31,7 @@ export default class TaskGiftPlugin extends Plugin {
 	api!: TasksApi;
 	engine!: SyncEngine;
 	private dataFile!: DataFile;
+	private music!: GiftMusic;
 
 	private intervalId: number | null = null;
 	private retryTimer: number | null = null;
@@ -51,10 +54,16 @@ export default class TaskGiftPlugin extends Plugin {
 			onError: (msg) => this.showError(msg),
 		});
 
+		this.music = new GiftMusic(this.app);
+		// Gift music plays only while a gift view is on screen.
+		const updateMusic = () => this.updateMusic();
+		this.registerEvent(this.app.workspace.on("active-leaf-change", updateMusic));
+		this.registerEvent(this.app.workspace.on("layout-change", updateMusic));
+
 		this.registerView(VIEW_TYPE, (leaf) => new TaskView(leaf, this));
 
 		this.addRibbonIcon("gift", "Open Task Gift", () => void this.activateView());
-		this.addRibbonIcon("list-plus", "New Google task", () => this.openTaskModal());
+		this.addRibbonIcon("clipboard-plus", "New Google task", () => this.openTaskModal());
 
 		this.addCommand({ id: "open-view", name: "Open board", callback: () => void this.activateView() });
 		this.addCommand({ id: "new-task", name: "New task", callback: () => this.openTaskModal() });
@@ -90,6 +99,7 @@ export default class TaskGiftPlugin extends Plugin {
 
 	onunload(): void {
 		if (this.retryTimer !== null) window.clearTimeout(this.retryTimer);
+		this.music.stop();
 		void this.persist();
 	}
 
@@ -103,18 +113,10 @@ export default class TaskGiftPlugin extends Plugin {
 
 	private static mergeSettings(raw: Partial<TaskGiftSettings> | undefined): TaskGiftSettings {
 		const s = Object.assign({}, DEFAULT_SETTINGS, raw ?? {});
-		s.boardFilter = Object.assign({}, DEFAULT_SETTINGS.boardFilter, raw?.boardFilter ?? {});
-		s.giftFilter = Object.assign({}, DEFAULT_SETTINGS.giftFilter, raw?.giftFilter ?? {});
-		if (!Array.isArray(s.giftExcludeKeywords)) s.giftExcludeKeywords = [];
 		if (!(s.giftSound in SOUND_LABELS)) s.giftSound = DEFAULT_SETTINGS.giftSound;
-		// Older versions had a single background image.
-		const legacyBg = (raw as { giftBackground?: string } | undefined)?.giftBackground;
-		s.giftBackgrounds = Array.isArray(s.giftBackgrounds) ? [...s.giftBackgrounds] : [];
-		if (legacyBg && !s.giftBackgrounds.includes(legacyBg)) {
-			s.giftBackgrounds.push(legacyBg);
-			s.giftBackgroundPick = legacyBg;
-		}
-		delete (s as { giftBackground?: string }).giftBackground;
+		// Also turns the filter settings of older versions into the first mode.
+		normalizeModes(s);
+		if (!Number.isFinite(s.boardZoom)) s.boardZoom = DEFAULT_SETTINGS.boardZoom;
 		// Removed settings: the markdown sync note and the board-wide sort.
 		for (const key of ["notePath", "mirrorToNote", "boardSort"]) delete (s as unknown as Record<string, unknown>)[key];
 		s.columnSort = Object.assign({}, raw?.columnSort ?? {});
@@ -455,6 +457,21 @@ export default class TaskGiftPlugin extends Plugin {
 			const view = leaf.view;
 			if (view instanceof TaskView) view.refresh();
 		}
+		this.updateMusic();
+	}
+
+	updateMusic(): void {
+		const onScreen =
+			this.settings.giftMode &&
+			this.app.workspace.getLeavesOfType(VIEW_TYPE).some((leaf) => leaf.view instanceof TaskView && leaf.view.containerEl.isShown());
+		this.music.update(this.settings, onScreen);
+	}
+
+	/** Switches the active mode (header menu). */
+	async setActiveMode(id: string): Promise<void> {
+		if (id === this.settings.activeModeId || !this.settings.modes.some((m) => m.id === id)) return;
+		this.settings.activeModeId = id;
+		await this.saveSettings();
 	}
 
 	async activateView(): Promise<void> {

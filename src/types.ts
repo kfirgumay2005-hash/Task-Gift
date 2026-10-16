@@ -87,6 +87,28 @@ export type BoardSort = "default" | "dateAsc" | "dateDesc";
 /** Built-in gift sounds, "random" (one of them each time) or "custom" (an audio file from the vault). */
 export type GiftSound = "birthday" | "chime" | "magic" | "random" | "custom";
 
+/**
+ * A mode (e.g. "Home", "Work") decides which tasks gifts are drawn from and how gift mode looks.
+ * Switched from the header of the Task Gift view.
+ */
+export interface TaskMode {
+	id: string;
+	name: string;
+	filter: DateFilter;
+	/** null = all lists. */
+	includedLists: string[] | null;
+	/** Tasks whose description contains any of these words are never drawn from a gift. */
+	excludeKeywords: string[];
+	/** Vault paths of images / videos shown behind gift mode. */
+	backgrounds: string[];
+	/** "random" (a different one per gift) or one path from backgrounds. */
+	backgroundPick: string;
+	/** How much the background is faded towards the theme background, 0..90. */
+	backgroundDim: number;
+	/** The board uses this mode's dates and lists too (otherwise it shows every task). */
+	applyToBoard: boolean;
+}
+
 export interface TaskGiftSettings {
 	clientId: string;
 	clientSecret: string;
@@ -102,24 +124,28 @@ export interface TaskGiftSettings {
 	giftSoundFile: string;
 	/** 0..100 */
 	giftSoundVolume: number;
-	/** Vault paths of images that can be shown behind gift mode. */
-	giftBackgrounds: string[];
-	/** "random" (a different image per gift) or one path from giftBackgrounds. */
-	giftBackgroundPick: string;
-	/** How much the background image is faded towards the theme background, 0..90. */
-	giftBackgroundDim: number;
 	grouping: Grouping;
 	showCompleted: boolean;
 	/** Card order per board column, keyed by column (list ID, "today", "completed", …). Missing = default. */
 	columnSort: Record<string, BoardSort>;
 	weekStart: 0 | 1;
-	boardFilter: DateFilter;
-	separateGiftFilter: boolean;
-	giftFilter: DateFilter;
-	/** null = all lists. */
-	includedLists: string[] | null;
-	/** Tasks whose description contains any of these words are never drawn from a gift. */
-	giftExcludeKeywords: string[];
+	/** At least one mode always exists; exactly one is active. */
+	modes: TaskMode[];
+	activeModeId: string;
+	/** Small celebration when every task of a gift is done. */
+	victoryAnimation: boolean;
+	victorySoundEnabled: boolean;
+	/** Vault path of the audio file played when a gift is finished. */
+	victorySoundFile: string;
+	/** Music looping while the gift view is shown. */
+	giftMusicEnabled: boolean;
+	giftMusicFile: string;
+	/** 0..100 */
+	giftMusicVolume: number;
+	/** Play the sound track of a video background. */
+	giftVideoSound: boolean;
+	/** Board zoom in percent. */
+	boardZoom: number;
 }
 
 export interface AuthData {

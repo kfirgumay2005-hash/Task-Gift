@@ -3,7 +3,8 @@ import type TaskGiftPlugin from "../main";
 import type { Task } from "../types";
 import { filterFor, isExcludedFromGift, isListIncluded, matchesDateFilter } from "../filters/dates";
 import { today } from "../util/dates";
-import { playGiftSound } from "../audio/sounds";
+import { playGiftSound, playVictorySound } from "../audio/sounds";
+import { activeMode } from "../modes";
 import { isVideo } from "../util/media";
 import { renderCard } from "./card";
 
@@ -38,6 +39,8 @@ export class GiftController {
 	/** Kept across re-renders so a video background doesn't restart on every refresh. */
 	private video: HTMLVideoElement | null = null;
 	private container: HTMLElement | null = null;
+	/** Every task of the gift was just done: celebrate on the next render. */
+	private celebrate = false;
 
 	constructor(private readonly plugin: TaskGiftPlugin) {}
 
@@ -60,7 +63,7 @@ export class GiftController {
 			.filter(
 				(t) =>
 					t.status !== "completed" &&
-					isListIncluded(s, t.listId) &&
+					isListIncluded(s, t.listId, "gift") &&
 					matchesDateFilter(t, filter, s.weekStart) &&
 					!isExcludedFromGift(s, t),
 			);
@@ -89,6 +92,7 @@ export class GiftController {
 			g.drawn = [];
 			g.done = [];
 			this.justFinished = true;
+			this.celebrate = true;
 			this.nextBackground();
 		}
 		if (g.opened && g.drawn.length === 0 && !g.pendingRedraw) g.opened = false;
@@ -114,12 +118,17 @@ export class GiftController {
 		}
 		this.reconcile();
 		// Keep confetti that is still flying across the re-render.
-		const flying = Array.from(container.querySelectorAll<HTMLElement>(".tg-confetti"));
+		const flying = Array.from(container.querySelectorAll<HTMLElement>(".tg-confetti, .tg-victory"));
 		container.empty();
 		const stage = container.createDiv({ cls: "tg-gift-stage" });
 		stage.toggleClass("is-no-motion", this.motion() === "none");
 		this.applyBackground(stage);
 		for (const layer of flying) stage.appendChild(layer);
+		this.renderControls(stage);
+		if (this.celebrate) {
+			this.celebrate = false;
+			this.victory(stage);
+		}
 
 		if (this.plugin.settings.showGiftCounter) {
 			const counter = stage.createDiv({ cls: "tg-gift-counter" });
@@ -141,20 +150,20 @@ export class GiftController {
 			return;
 		}
 		if (!this.candidates().length) {
-			this.renderEmpty(stage, "🌿", "All done for now", "No tasks match your gift filter. Enjoy the break.");
+			this.renderEmpty(stage, "🌿", "All done for now", `No tasks match the "${activeMode(this.plugin.settings).name}" mode. Enjoy the break.`);
 			this.justFinished = false;
 			return;
 		}
 		this.renderWrapped(stage);
 	}
 
-	/** Picks the next background: the chosen image, or a random one (different from the last when possible). */
+	/** Picks the next background of the active mode: the chosen one, or a random one (different from the last when possible). */
 	private nextBackground(): void {
-		const s = this.plugin.settings;
+		const mode = activeMode(this.plugin.settings);
 		const vault = this.plugin.app.vault;
-		const existing = s.giftBackgrounds.filter((path) => vault.getAbstractFileByPath(path) instanceof TFile);
-		if (s.giftBackgroundPick !== "random" && existing.includes(s.giftBackgroundPick)) {
-			this.background = s.giftBackgroundPick;
+		const existing = mode.backgrounds.filter((path) => vault.getAbstractFileByPath(path) instanceof TFile);
+		if (mode.backgroundPick !== "random" && existing.includes(mode.backgroundPick)) {
+			this.background = mode.backgroundPick;
 			return;
 		}
 		const pool = existing.length > 1 ? existing.filter((path) => path !== this.background) : existing;
@@ -163,40 +172,104 @@ export class GiftController {
 
 	private applyBackground(stage: HTMLElement): void {
 		const s = this.plugin.settings;
+		const mode = activeMode(s);
 		const stale =
 			this.background === null ||
-			!s.giftBackgrounds.includes(this.background) ||
-			(s.giftBackgroundPick !== "random" && this.background !== s.giftBackgroundPick);
+			!mode.backgrounds.includes(this.background) ||
+			(mode.backgroundPick !== "random" && this.background !== mode.backgroundPick);
 		if (stale) this.nextBackground();
 		const file = this.background ? this.plugin.app.vault.getAbstractFileByPath(this.background) : null;
 		if (!(file instanceof TFile)) {
-			this.video = null;
+			this.dropVideo();
 			return;
 		}
 		const src = this.plugin.app.vault.getResourcePath(file);
 		stage.addClass("has-background");
-		stage.style.setProperty("--tg-bg-dim", `${Math.min(90, Math.max(0, s.giftBackgroundDim))}%`);
+		stage.style.setProperty("--tg-bg-dim", `${Math.min(90, Math.max(0, mode.backgroundDim))}%`);
 		if (!isVideo(file.path)) {
-			this.video = null;
+			this.dropVideo();
 			stage.style.setProperty("--tg-bg-image", `url("${src}")`);
 			return;
 		}
 		stage.addClass("has-video");
 		if (!this.video || this.video.dataset.path !== file.path) {
+			this.dropVideo();
 			this.video = createEl("video", { cls: "tg-bg-video", attr: { src, "aria-hidden": "true" } });
 			this.video.dataset.path = file.path;
-			// Muted + playsinline are required for autoplay, especially on mobile.
-			this.video.muted = true;
 			this.video.loop = true;
 			this.video.autoplay = true;
+			// Required for autoplay on mobile.
 			this.video.playsInline = true;
 		}
 		stage.prepend(this.video);
 		stage.createDiv({ cls: "tg-bg-dim" });
+		this.playVideo();
+	}
+
+	/** (Re)starts the video background, with or without its sound. */
+	private playVideo(): void {
+		const video = this.video;
+		if (!video) return;
+		video.muted = !this.plugin.settings.giftVideoSound;
 		// Moving the element out of the document pauses it; resume where it was.
-		void this.video.play().catch(() => {
-			/* autoplay blocked: the first frame stays as a still background */
+		void video.play().catch(() => {
+			if (video.muted) return; // autoplay blocked: the first frame stays as a still background
+			// Playing with sound needs a click first; play muted until then.
+			video.muted = true;
+			void video.play().catch(() => undefined);
 		});
+	}
+
+	private dropVideo(): void {
+		this.video?.pause();
+		this.video = null;
+	}
+
+	/** Pauses or resumes the video background when the view is hidden or shown again. */
+	setOnScreen(onScreen: boolean): void {
+		if (onScreen) {
+			if (this.video?.paused) this.playVideo();
+		} else {
+			this.video?.pause();
+		}
+	}
+
+	/** Quick toggles in the corner of the stage: music and the video's sound. */
+	private renderControls(stage: HTMLElement): void {
+		const p = this.plugin;
+		const s = p.settings;
+		const bar = stage.createDiv({ cls: "tg-gift-controls" });
+		if (s.giftMusicFile) {
+			const on = s.giftMusicEnabled;
+			const music = bar.createEl("button", {
+				cls: "clickable-icon tg-gift-control",
+				attr: { "aria-label": on ? "Turn music off" : "Turn music on" },
+			});
+			music.toggleClass("is-active", on);
+			// There is no "music off" icon: a CSS strike-through marks it.
+			setIcon(music, "music");
+			music.toggleClass("is-off", !on);
+			music.addEventListener("click", () => {
+				s.giftMusicEnabled = !s.giftMusicEnabled;
+				void p.saveSettings();
+			});
+		}
+		if (this.video) {
+			const on = s.giftVideoSound;
+			const sound = bar.createEl("button", {
+				cls: "clickable-icon tg-gift-control",
+				attr: { "aria-label": on ? "Mute video" : "Play video sound" },
+			});
+			sound.toggleClass("is-active", on);
+			setIcon(sound, on ? "volume-2" : "volume-x");
+			sound.addEventListener("click", () => {
+				s.giftVideoSound = !s.giftVideoSound;
+				// Unmute right inside the click, so the browser allows sound.
+				this.playVideo();
+				void p.saveSettings();
+			});
+		}
+		if (!bar.childElementCount) bar.remove();
 	}
 
 	private requeue(): void {
@@ -393,6 +466,33 @@ export class GiftController {
 			f.style.setProperty("--tg-r", `${rand(-40, 40)}deg`);
 		}
 		window.setTimeout(() => layer.remove(), 2400);
+	}
+
+	/** Small celebration when the whole gift is done: a trophy pops up and confetti rains down. */
+	private victory(stage: HTMLElement): void {
+		const s = this.plugin.settings;
+		playVictorySound(this.plugin.app, s);
+		if (!s.victoryAnimation) return;
+		const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		const layer = stage.createDiv({ cls: "tg-victory", attr: { "aria-hidden": "true" } });
+		if (reduced) layer.addClass("is-reduced");
+		const badge = layer.createDiv({ cls: "tg-victory-badge" });
+		badge.createDiv({ cls: "tg-victory-rays" });
+		badge.createDiv({ cls: "tg-victory-trophy", text: "🏆" });
+		layer.createDiv({ cls: "tg-victory-title", text: "Victory!" });
+		if (!reduced) {
+			for (let i = 0; i < 40; i++) {
+				const piece = layer.createSpan({ cls: "tg-victory-piece" });
+				if (i % 3 === 0) piece.addClass("is-round");
+				piece.style.setProperty("--tg-left", `${rand(0, 100)}%`);
+				piece.style.setProperty("--tg-drift", `${rand(-60, 60)}px`);
+				piece.style.setProperty("--tg-r", `${rand(-720, 720)}deg`);
+				piece.style.setProperty("--tg-delay", `${rand(0, 700)}ms`);
+				piece.style.setProperty("--tg-dur", `${rand(1600, 2400)}ms`);
+				piece.style.setProperty("--tg-color", CONFETTI_COLORS[i % CONFETTI_COLORS.length]);
+			}
+		}
+		window.setTimeout(() => layer.remove(), 3200);
 	}
 
 	private flash(stage: HTMLElement): void {

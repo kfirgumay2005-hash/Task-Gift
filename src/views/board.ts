@@ -11,7 +11,12 @@ export interface BoardUiState {
 	queries: Map<string, string>;
 	/** Columns whose search box is open. */
 	searchOpen: Set<string>;
+	/** Ctrl + wheel / pinch movement not yet turned into a zoom step. */
+	zoomDelta: number;
 }
+
+/** Wheel / pinch distance for one zoom step. */
+const ZOOM_WHEEL_STEP = 60;
 
 interface Column {
 	key: string;
@@ -68,7 +73,7 @@ export function boardTasks(plugin: TaskGiftPlugin): Task[] {
 	const filter = filterFor(s, "board");
 	return plugin.store
 		.all()
-		.filter((t) => isListIncluded(s, t.listId))
+		.filter((t) => isListIncluded(s, t.listId, "board"))
 		.filter((t) => s.grouping === "status" || s.showCompleted || t.status !== "completed")
 		.filter((t) => matchesDateFilter(t, filter, s.weekStart));
 }
@@ -84,7 +89,7 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	if (s.grouping === "list") {
 		return store
 			.lists()
-			.filter((l) => isListIncluded(s, l.id))
+			.filter((l) => isListIncluded(s, l.id, "board"))
 			.map((l) => ({
 				key: l.id,
 				title: l.title,
@@ -145,9 +150,11 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	return cols.filter((c) => (c.key !== "overdue" && c.key !== "completed") || c.tasks.length > 0);
 }
 
-export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState): void {
+export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, onZoom: (zoom: number) => void): void {
 	const columns = buildColumns(plugin, boardTasks(plugin));
 	const board = container.createDiv({ cls: "tg-board" });
+	board.style.setProperty("--tg-zoom", String(plugin.settings.boardZoom / 100));
+	enableBoardNavigation(board, plugin, ui, onZoom);
 
 	if (!columns.length) {
 		const empty = board.createDiv({ cls: "tg-empty" });
@@ -157,6 +164,54 @@ export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: 
 	}
 
 	for (const col of columns) renderColumn(board, plugin, ui, col);
+}
+
+/**
+ * Ways to move around a board wider than the screen, for mice and laptop trackpads that can't scroll sideways:
+ * the wheel scrolls sideways outside the card lists, dragging the background pans, Ctrl + wheel (or pinch) zooms.
+ */
+function enableBoardNavigation(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, onZoom: (zoom: number) => void): void {
+	board.addEventListener(
+		"wheel",
+		(e) => {
+			if (e.ctrlKey || e.metaKey) {
+				e.preventDefault();
+				ui.zoomDelta += e.deltaY;
+				if (Math.abs(ui.zoomDelta) < ZOOM_WHEEL_STEP) return;
+				const steps = Math.trunc(ui.zoomDelta / ZOOM_WHEEL_STEP);
+				ui.zoomDelta = 0;
+				onZoom(plugin.settings.boardZoom - steps * 10);
+				return;
+			}
+			if (e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+			if (board.scrollWidth <= board.clientWidth) return;
+			const cards = (e.target as HTMLElement).closest(".tg-column-cards");
+			if (cards && cards.scrollHeight > cards.clientHeight) return;
+			e.preventDefault();
+			board.scrollLeft += e.deltaY;
+		},
+		{ passive: false },
+	);
+
+	board.addEventListener("pointerdown", (e) => {
+		const target = e.target as HTMLElement;
+		const onBackground = target === board || target.hasClass("tg-column-empty") || target.hasClass("tg-column-cards");
+		if (e.pointerType !== "mouse" || e.button !== 0 || !onBackground) return;
+		const startX = e.clientX;
+		const startScroll = board.scrollLeft;
+		board.setPointerCapture(e.pointerId);
+		board.addClass("is-panning");
+		const move = (ev: PointerEvent) => (board.scrollLeft = startScroll - (ev.clientX - startX));
+		const end = () => {
+			board.removeClass("is-panning");
+			board.removeEventListener("pointermove", move);
+			board.removeEventListener("pointerup", end);
+			board.removeEventListener("pointercancel", end);
+		};
+		board.addEventListener("pointermove", move);
+		board.addEventListener("pointerup", end);
+		board.addEventListener("pointercancel", end);
+	});
 }
 
 function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, col: Column): void {

@@ -1,7 +1,7 @@
 {
   "id": "taskgift",
   "name": "Task Gift",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "minAppVersion": "1.14.0",
   "description": "Two-way Google Tasks sync with a Kanban board and a gift mode that reveals one random task at a time.",
   "author": "KfirG",

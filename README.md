@@ -9,7 +9,7 @@ An Obsidian plugin that syncs your **Google Tasks** both ways and shows them eit
 - **Board view**: cards in columns grouped by list, by due date (Overdue / Today / Tomorrow / Later / No date) or by status. Drag cards between columns, or use the ⋯ menu (long-press on mobile), to move them between lists, change the date or complete them.
 - **Gift mode**: a wrapped box that reveals 1–5 random tasks, with "Done" and "Draw again" buttons. The current draw survives restarts.
 - **Task modal**: title, notes, list, date, time, and Google-Calendar-style recurrence.
-- **Date filters**: Yesterday, Today, Tomorrow, This week, Next 7 days, Overdue, No due date, or a custom range. You can combine them, use a separate filter for gift mode, and choose which lists are included.
+- **Modes** (e.g. *Home*, *Work*): each mode has its own date ranges (Yesterday, Today, Tomorrow, This week, Next 7 days, Overdue, No due date, custom range, combined as you like), task lists, excluded words and backgrounds. Exactly one mode is active; switch it from the mode button in the view header.
 
 ## Installation (from source)
 
@@ -62,19 +62,22 @@ Settings, the Google sign-in, sync state, repeat rules and times are stored in a
 ## Using it
 
 - **Open the view** with the gift icon in the ribbon, or the command *Task Gift: Open board*.
-- **New task**: the list-plus ribbon icon, the `+` in the view header or in a column, or the command *Task Gift: New task*.
+- **New task**: the clipboard-plus ribbon icon, the `+` in the view header or in a column, or the command *Task Gift: New task*.
 - **Edit**: click a card. The modal also has **Delete**.
 - **Sync**: automatic on startup, every N minutes (default 5) and about 1.5 seconds after local edits. You can also use the sync button, the command *Sync now*, or *Full resync* to re-download everything.
 - **Search a column**: the 🔍 button in a column header opens a search box for that column only; it filters its cards by title or description as you type (Esc clears and closes it).
 - **Sort a column**: the sort button next to it orders that column's cards by date, oldest or newest first (completion date for completed tasks, due date otherwise), or back to the default order. Each column remembers its own order.
 - **All completed tasks**: set *Keep completed tasks* to *Forever (no limit)*, or use *Download all completed tasks* in settings (or the command of the same name) to pull every completed task you have in Google, however old.
+- **Small screens**: the board fits the window and scrolls sideways. Scrolling the mouse wheel outside a card list moves left and right, and you can drag the empty background to pan. Zoom with the − / + buttons in the header, or Ctrl + scroll (pinch on a trackpad).
+- **Modes**: add, rename, reorder and delete modes under *Modes* in settings (there is always at least one). Each mode decides which tasks gifts are drawn from: date ranges, overdue / no-date tasks, task lists and excluded words, plus its own backgrounds. Turn on *Use on the board too* to filter the board by the mode as well; otherwise the board shows every task. Switch modes from the mode button in the header.
 - **Board by due date**: completed tasks (with *Show completed* on) go to their own *Completed* column, never to *Overdue*.
 - **Gift mode**: switch with the Board / Gift toggle in the header, the setting "Hide task board, show gifts instead", or the command *Toggle gift mode*.
   - **Open gift** charges the box up (it trembles harder and sparkles gather), then bursts open with light rays, confetti and a flash, and the drawn task(s) flip up out of it.
   - **Sound**: a sound plays when the gift bursts. Pick one of three built-in sounds (Happy Birthday, Chime, Magic wand), a random one each time, or your own mp3/wav/ogg file from the vault (*Import…* copies one from this device into your attachments folder). Turn it off or set the volume under *Gift sounds* in settings.
-  - **Done** completes the task in Google. Once every drawn task is done, a fresh wrapped gift appears, and it waits for you to open it.
+  - **Done** completes the task in Google. Once every drawn task is done, a small victory animation plays (can be turned off under *Victory*), optionally with your own victory music (mp3), and a fresh wrapped gift appears, waiting for you to open it.
   - **Draw again** puts the task back in the box: a freshly wrapped gift appears, and opening it reveals a different task. The rejected task is avoided for the next few draws if there are alternatives.
-  - **Backgrounds**: under *Gift backgrounds* in settings, add as many images, animated GIFs or videos (mp4, webm, mov; played muted and looped) as you like, from your computer or phone (they are copied into your attachments folder, as set in Obsidian's *Files and links* settings) or from images already in the vault. Show a random one for every gift, or always the same one. *Fade the image* blends it into your theme so the cards stay readable.
+  - **Music**: under *Music and video sound*, pick your own melody to loop while the gift view is on screen. The music button in the corner of the gift view turns it on and off.
+  - **Backgrounds**: in each mode's settings, add as many images, animated GIFs or videos (mp4, webm, mov; looped, muted unless you turn the video sound on with the speaker button in the gift view) as you like, from your computer or phone (they are copied into your attachments folder, as set in Obsidian's *Files and links* settings) or from images already in the vault. Show a random one for every gift, or always the same one. *Fade the image* blends it into your theme so the cards stay readable.
   - The current draw is saved, so closing Obsidian or the view never rerolls it.
   - With *Reduce motion* enabled in your OS, the animations become a simple fade. You can also turn animations off completely in settings.
 
@@ -129,7 +132,9 @@ src/
   sync/store.ts       local task store and all local mutations (+ recurrence spawning)
   sync/engine.ts      pull / push / conflict handling
   recurrence/rule.ts  recurrence model and next-date calculation
+  modes.ts            modes (and migration of the old filter settings)
   filters/dates.ts    date range filters
+  audio/              gift and victory sounds, gift music
   views/              TaskView (header), board, gift mode, card
   modals/             task modal, confirm modal
 ```

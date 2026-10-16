@@ -1,7 +1,9 @@
 import { ItemView, Menu, setIcon, WorkspaceLeaf } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import { VIEW_TYPE } from "../defaults";
-import { describeFilter, filterFor } from "../filters/dates";
+import { describeFilter } from "../filters/dates";
+import { activeMode } from "../modes";
+import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from "../defaults";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
 import { BoardUiState, renderBoard } from "./board";
@@ -12,7 +14,7 @@ const GROUPING_LABELS: Record<Grouping, string> = { list: "By list", date: "By d
 export class TaskView extends ItemView {
 	private headerEl!: HTMLElement;
 	/** Per-column search state; survives re-renders while the view is open. */
-	private boardUi: BoardUiState = { queries: new Map(), searchOpen: new Set() };
+	private boardUi: BoardUiState = { queries: new Map(), searchOpen: new Set(), zoomDelta: 0 };
 	private bodyEl!: HTMLElement;
 	private syncBtn!: HTMLElement;
 	private gift: GiftController;
@@ -43,11 +45,18 @@ export class TaskView extends ItemView {
 		this.headerEl = root.createDiv({ cls: "tg-header" });
 		this.bodyEl = root.createDiv({ cls: "tg-body" });
 		this.unsubscribe = this.plugin.onStatus((s) => this.updateSyncButton(s));
+		// Pause a video background (and its sound) while this tab is hidden.
+		const syncMedia = () => this.gift.setOnScreen(this.plugin.settings.giftMode && this.containerEl.isShown());
+		this.registerEvent(this.app.workspace.on("active-leaf-change", syncMedia));
+		this.registerEvent(this.app.workspace.on("layout-change", syncMedia));
 		this.refresh();
 	}
 
 	async onClose(): Promise<void> {
 		this.unsubscribe?.();
+		this.gift.setOnScreen(false);
+		// Stops the gift music once no gift view is left.
+		window.setTimeout(() => this.plugin.updateMusic(), 0);
 	}
 
 	refresh(): void {
@@ -79,7 +88,7 @@ export class TaskView extends ItemView {
 		const caret = typingIn ? [typingIn.selectionStart, typingIn.selectionEnd] : null;
 
 		this.bodyEl.empty();
-		renderBoard(this.bodyEl, this.plugin, this.boardUi);
+		renderBoard(this.bodyEl, this.plugin, this.boardUi, (zoom) => void this.setZoom(zoom));
 
 		const next = this.bodyEl.querySelector(".tg-board");
 		if (next) next.scrollLeft = scrollLeft;
@@ -114,13 +123,31 @@ export class TaskView extends ItemView {
 		mk("board", "layout-dashboard", "Board");
 		mk("gift", "gift", "Gift");
 
-		const filterChip = left.createEl("button", {
-			cls: "tg-filter-chip",
-			attr: { "aria-label": "Date filter (change in settings)" },
+		const current = activeMode(p.settings);
+		const boardFiltered = mode === "gift" || current.applyToBoard;
+		const modeChip = left.createEl("button", {
+			cls: "tg-filter-chip tg-mode-chip",
+			attr: { "aria-label": `Mode: ${current.name} · ${describeFilter(current.filter)}${boardFiltered ? "" : " (gifts only)"}
+Click to switch` },
 		});
-		setIcon(filterChip.createSpan(), "filter");
-		filterChip.createSpan({ text: describeFilter(filterFor(p.settings, mode)) });
-		filterChip.addEventListener("click", () => this.openSettings());
+		setIcon(modeChip.createSpan(), "layers");
+		modeChip.createSpan({ cls: "tg-mode-chip-name", text: current.name });
+		if (boardFiltered) modeChip.createSpan({ cls: "tg-mode-chip-filter", text: describeFilter(current.filter) });
+		setIcon(modeChip.createSpan({ cls: "tg-mode-chip-caret" }), "chevron-down");
+		modeChip.addEventListener("click", (e) => {
+			const menu = new Menu();
+			for (const m of p.settings.modes) {
+				menu.addItem((i) =>
+					i
+						.setTitle(m.name)
+						.setChecked(m.id === current.id)
+						.onClick(() => void p.setActiveMode(m.id)),
+				);
+			}
+			menu.addSeparator();
+			menu.addItem((i) => i.setTitle("Edit modes…").setIcon("settings").onClick(() => this.openSettings()));
+			menu.showAtMouseEvent(e);
+		});
 
 		const right = h.createDiv({ cls: "tg-header-right" });
 		if (mode === "board") {
@@ -153,6 +180,18 @@ export class TaskView extends ItemView {
 				menu.showAtMouseEvent(e);
 			});
 
+			const zoom = right.createDiv({ cls: "tg-zoom", attr: { role: "group", "aria-label": "Board zoom" } });
+			const zoomOut = zoom.createEl("button", { cls: "clickable-icon tg-icon-btn", attr: { "aria-label": "Zoom out (Ctrl + scroll)" } });
+			setIcon(zoomOut, "zoom-out");
+			zoomOut.disabled = p.settings.boardZoom <= BOARD_ZOOM_MIN;
+			zoomOut.addEventListener("click", () => void this.setZoom(p.settings.boardZoom - BOARD_ZOOM_STEP));
+			const reset = zoom.createEl("button", { cls: "tg-zoom-level", text: `${p.settings.boardZoom}%`, attr: { "aria-label": "Reset zoom" } });
+			reset.addEventListener("click", () => void this.setZoom(100));
+			const zoomIn = zoom.createEl("button", { cls: "clickable-icon tg-icon-btn", attr: { "aria-label": "Zoom in (Ctrl + scroll)" } });
+			setIcon(zoomIn, "zoom-in");
+			zoomIn.disabled = p.settings.boardZoom >= BOARD_ZOOM_MAX;
+			zoomIn.addEventListener("click", () => void this.setZoom(p.settings.boardZoom + BOARD_ZOOM_STEP));
+
 			const completed = right.createEl("button", {
 				cls: "clickable-icon tg-icon-btn",
 				attr: { "aria-label": p.settings.showCompleted ? "Hide completed" : "Show completed" },
@@ -183,6 +222,13 @@ export class TaskView extends ItemView {
 			menu.addItem((i) => i.setTitle("Settings").setIcon("settings").onClick(() => this.openSettings()));
 			menu.showAtMouseEvent(e);
 		});
+	}
+
+	private async setZoom(zoom: number): Promise<void> {
+		const next = Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, Math.round(zoom / BOARD_ZOOM_STEP) * BOARD_ZOOM_STEP));
+		if (next === this.plugin.settings.boardZoom) return;
+		this.plugin.settings.boardZoom = next;
+		await this.plugin.saveSettings();
 	}
 
 	private updateSyncButton(s: SyncStatus): void {

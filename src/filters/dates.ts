@@ -1,5 +1,6 @@
 import type { DateFilter, DatePreset, Task, TaskGiftSettings } from "../types";
 import { addDays, startOfWeek, today } from "../util/dates";
+import { activeMode } from "../modes";
 
 export const PRESET_LABELS: Record<DatePreset, string> = {
 	all: "Any date",
@@ -57,8 +58,8 @@ function rangesFor(filter: DateFilter, weekStart: number, t: string): Range[] {
 }
 
 /** True when the task's due date passes the date filter. */
-export function matchesDateFilter(task: Task, filter: DateFilter, weekStart: number): boolean {
-	if (filter.presets.includes("all") || filter.presets.length === 0 && !filter.includeOverdue && !filter.includeNoDate) {
+export function matchesDateFilter(task: Task, filter: DateFilter | null, weekStart: number): boolean {
+	if (!filter || filter.presets.includes("all") || filter.presets.length === 0 && !filter.includeOverdue && !filter.includeNoDate) {
 		return true;
 	}
 	const t = today();
@@ -67,18 +68,22 @@ export function matchesDateFilter(task: Task, filter: DateFilter, weekStart: num
 	return rangesFor(filter, weekStart, t).some(([a, b]) => task.due !== null && task.due >= a && task.due <= b);
 }
 
-export function filterFor(settings: TaskGiftSettings, mode: "board" | "gift"): DateFilter {
-	return mode === "gift" && settings.separateGiftFilter ? settings.giftFilter : settings.boardFilter;
+/** The date filter in effect: the active mode's, or null when the board shows every date. */
+export function filterFor(settings: TaskGiftSettings, view: "board" | "gift"): DateFilter | null {
+	const mode = activeMode(settings);
+	return view === "gift" || mode.applyToBoard ? mode.filter : null;
 }
 
-export function isListIncluded(settings: TaskGiftSettings, listId: string): boolean {
-	return settings.includedLists === null || settings.includedLists.includes(listId);
+export function isListIncluded(settings: TaskGiftSettings, listId: string, view: "board" | "gift"): boolean {
+	const mode = activeMode(settings);
+	if (view === "board" && !mode.applyToBoard) return true;
+	return mode.includedLists === null || mode.includedLists.includes(listId);
 }
 
-/** True when the task's description contains one of the gift exclusion words (case-insensitive). */
+/** True when the task's description contains one of the active mode's exclusion words (case-insensitive). */
 export function isExcludedFromGift(settings: TaskGiftSettings, task: Task): boolean {
 	const notes = task.notes.toLowerCase();
-	return settings.giftExcludeKeywords.some((k) => k && notes.includes(k.toLowerCase()));
+	return activeMode(settings).excludeKeywords.some((k) => k && notes.includes(k.toLowerCase()));
 }
 
 export function describeFilter(filter: DateFilter): string {

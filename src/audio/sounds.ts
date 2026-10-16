@@ -114,3 +114,19 @@ export function playGiftSound(app: App, s: TaskGiftSettings, force = false): voi
 		/* Audio unavailable; opening a gift must never fail because of sound. */
 	}
 }
+
+/** Plays the victory music (an audio file from the vault) when a gift is finished. */
+export function playVictorySound(app: App, s: TaskGiftSettings, force = false): void {
+	if (!s.victorySoundEnabled && !force) return;
+	if (!s.victorySoundFile) {
+		if (force) new Notice("Choose an audio file first.");
+		return;
+	}
+	const volume = Math.min(1, Math.max(0, s.giftSoundVolume / 100));
+	if (volume === 0) return;
+	try {
+		playFile(app, s.victorySoundFile, volume);
+	} catch {
+		/* Audio unavailable. */
+	}
+}
