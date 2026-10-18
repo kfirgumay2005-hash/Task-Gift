@@ -34,6 +34,8 @@ export class SyncEngine {
 	private rerun = false;
 	private rerunFull = false;
 	private failedTasks = new Set<string>();
+	/** Tasks found completed in Google during the current pull; their next occurrence is handled after the pull. */
+	private completedRemotely: string[] = [];
 	status: SyncStatus = { state: "disconnected", message: "Not connected", lastSync: null, pending: 0 };
 
 	constructor(
@@ -120,6 +122,7 @@ export class SyncEngine {
 		const lastFull = data.lastFullSyncAt ? Date.parse(data.lastFullSyncAt) : 0;
 		const full = forceFull || !data.lastSyncAt || Date.now() - lastFull > FULL_SYNC_EVERY_MS;
 
+		this.completedRemotely = [];
 		const remoteLists = await this.api.listTaskLists();
 		const remoteIds = new Set(remoteLists.map((l) => l.id));
 		const newLists = new Set<string>();
@@ -167,6 +170,12 @@ export class SyncEngine {
 				for (const r of changed) this.merge(r, list.id);
 			}
 		}
+		// After the whole pull, so a next occurrence another device already pushed is known and gets adopted.
+		for (const id of this.completedRemotely) {
+			const t = data.tasks[id];
+			if (t?.status === "completed") this.store.maybeSpawnNext(t);
+		}
+		this.completedRemotely = [];
 		data.lastSyncAt = startedAt;
 		if (full) data.lastFullSyncAt = startedAt;
 	}
@@ -246,7 +255,7 @@ export class SyncEngine {
 		const wasCompleted = local.status === "completed";
 		Object.assign(local, this.fromRemote(r, listId));
 		this.store.data.snapshots[r.id] = r.updated;
-		if (!wasCompleted && local.status === "completed") this.store.maybeSpawnNext(local);
+		if (!wasCompleted && local.status === "completed") this.completedRemotely.push(local.id);
 	}
 
 	// ---------------------------------------------------------------- push

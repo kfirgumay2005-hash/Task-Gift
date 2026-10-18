@@ -255,19 +255,31 @@ export class TaskStore {
 			this.data.spawned[task.id] = "end";
 			return;
 		}
-		const created = this.create(
-			{ title: task.title, notes: task.notes, listId: task.listId, due: next.due, parent: task.parent },
-			"local",
-			true,
+		// Another device may already have created the next occurrence (each device sees the completion in Google,
+		// but the data note saying it was spawned can arrive later). Adopt that task instead of adding a copy.
+		const existing = this.all().find(
+			(t) =>
+				t.id !== task.id &&
+				t.title === task.title &&
+				t.listId === task.listId &&
+				t.due === next.due &&
+				(t.parent ?? null) === (task.parent ?? null),
 		);
-		this.data.recurrence[created.id] = next.rule;
+		const target =
+			existing ??
+			this.create(
+				{ title: task.title, notes: task.notes, listId: task.listId, due: next.due, parent: task.parent },
+				"local",
+				true,
+			);
+		this.data.recurrence[target.id] ??= next.rule;
 		const time = this.data.times[task.id];
-		if (time) this.data.times[created.id] = time;
+		if (time) this.data.times[target.id] ??= time;
 		const color = this.data.colors[task.id];
-		if (color) this.data.colors[created.id] = color;
+		if (color) this.data.colors[target.id] ??= color;
 		const modes = this.data.taskModes[task.id];
-		if (modes) this.data.taskModes[created.id] = [...modes];
-		this.data.spawned[task.id] = created.id;
+		if (modes) this.data.taskModes[target.id] ??= [...modes];
+		this.data.spawned[task.id] = target.id;
 	}
 
 	/** Drops old completed tasks from local state (they stay in Google). */
