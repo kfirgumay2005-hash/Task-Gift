@@ -1,5 +1,5 @@
 import { App, Menu, Modal, Notice, setIcon } from "obsidian";
-import type { RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, Task, TaskColor, Weekday } from "../types";
+import type { NamedTaskColor, RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, Task, TaskColor, Weekday } from "../types";
 import type { TaskStore } from "../sync/store";
 import { isLastWeekdayOfMonth, nthOfMonth, ruleFromPreset } from "../recurrence/rule";
 import { addDays, addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT, weekday } from "../util/dates";
@@ -199,7 +199,7 @@ export class TaskModal extends Modal {
 			});
 			return el;
 		};
-		const pick = (value: string | null, label: string): HTMLElement => {
+		const pick = (value: TaskColor | null, label: string): HTMLElement => {
 			const el = swatch(label, () => {
 				this.color = value;
 				this.renderColorRow(row, colors);
@@ -215,8 +215,8 @@ export class TaskModal extends Modal {
 		};
 
 		pick(null, "No color");
-		for (const [value, label] of Object.entries(TASK_COLORS)) pick(value, label);
-		const custom = [...colors.custom];
+		for (const [value, label] of Object.entries(TASK_COLORS)) pick(value as NamedTaskColor, label);
+		const custom = [...colors.custom] as TaskColor[];
 		// A custom color removed from the palette stays on tasks that use it.
 		if (this.color && !(this.color in TASK_COLORS) && !custom.includes(this.color)) custom.push(this.color);
 		for (const hex of custom) {
@@ -243,7 +243,8 @@ export class TaskModal extends Modal {
 		plus.addClass("is-add");
 		setIcon(plus, "plus");
 		input.addEventListener("change", () => {
-			const hex = input.value.toLowerCase();
+			// A color input always gives "#rrggbb".
+			const hex = input.value.toLowerCase() as TaskColor;
 			if (!colors.custom.includes(hex)) {
 				colors.custom = [...colors.custom, hex];
 				colors.save(colors.custom);

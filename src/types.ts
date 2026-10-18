@@ -93,7 +93,7 @@ export type CalendarRange = "month" | "week";
 export type NamedTaskColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "pink";
 
 /** A built-in color name or a custom "#rrggbb" color. */
-export type TaskColor = NamedTaskColor | string;
+export type TaskColor = NamedTaskColor | `#${string}`;
 
 /** Where task colors are shown. */
 export type TaskColorScope = "both" | "board" | "calendar" | "off";

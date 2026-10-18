@@ -145,7 +145,7 @@ export class ModesEditor {
 			.addButton((b) =>
 				b
 					.setButtonText("Delete mode")
-					.setWarning()
+					.setDestructive()
 					.setDisabled(modes.length <= 1)
 					.onClick(() =>
 						new ConfirmModal(this.plugin.app, "Delete mode?", `"${mode.name}" and its settings will be deleted.`, "Delete", () => {
@@ -312,7 +312,6 @@ export class ModesEditor {
 				sl
 					.setLimits(0, 90, 5)
 					.setValue(mode.backgroundDim)
-					.setDynamicTooltip()
 					.onChange((v) => edit((m) => (m.backgroundDim = v))),
 			);
 	}
@@ -325,7 +324,6 @@ export class ModesEditor {
 				sl
 					.setLimits(0, 100, 5)
 					.setValue(mode[key])
-					.setDynamicTooltip()
 					.onChange((v) => edit((m) => (m[key] = v))),
 			);
 			if (desc) row.setDesc(desc);

@@ -1,7 +1,10 @@
-import { App, moment, normalizePath, TFile } from "obsidian";
+import { App, moment as obsidianMoment, normalizePath, TFile } from "obsidian";
 import type { TaskStore } from "./sync/store";
 import type { Task, TaskGiftSettings } from "./types";
 import { today } from "./util/dates";
+
+/** Obsidian's bundled moment, typed for the one call used here (its own typings can resolve to `any`). */
+const moment = obsidianMoment as unknown as () => { format(format: string): string };
 
 interface DailyNotesOptions {
 	folder?: string;
