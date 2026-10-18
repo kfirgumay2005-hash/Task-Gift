@@ -21,7 +21,7 @@ export class TaskView extends ItemView {
 	private headerEl!: HTMLElement;
 	/** Per-column search state; survives re-renders while the view is open. */
 	private boardUi: BoardUiState = { queries: new Map(), searchOpen: new Set(), zoomDelta: 0 };
-	private calendarUi: CalendarUiState = { anchor: today() };
+	private calendarUi: CalendarUiState = { anchor: today(), calendar: null };
 	/** Header search over all tasks; while it has text, the body shows its results. */
 	private search = { open: false, query: "" };
 	private bodyEl!: HTMLElement;

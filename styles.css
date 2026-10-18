@@ -2627,3 +2627,142 @@
 .tg-modes-editor .tg-bg-thumb {
 	margin-right: 12px;
 }
+
+/* ------------------------------------------------------------- extra calendars */
+
+.tg-cal-picker.has-color {
+	box-shadow: inset 3px 0 0 var(--tg-task-color);
+}
+
+.tg-cal-picker .tg-mode-chip-caret svg {
+	width: 12px;
+	height: 12px;
+}
+
+.tg-cal-entry.is-week {
+	flex-wrap: wrap;
+	align-items: flex-start;
+	padding: 4px 6px 4px 4px;
+}
+
+.tg-cal-entry.is-week .tg-cal-check {
+	margin-top: 2px;
+}
+
+.tg-cal-entry.is-week .tg-cal-item-title {
+	white-space: normal;
+	flex-basis: 100%;
+	padding-left: 16px;
+	font-weight: var(--font-semibold);
+}
+
+.tg-cal-entry-notes {
+	flex-basis: 100%;
+	padding-left: 16px;
+	color: var(--text-muted);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	display: -webkit-box;
+	-webkit-line-clamp: 4;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.tg-cal-entry.is-done .tg-cal-entry-notes {
+	color: var(--text-faint);
+}
+
+.tg-import-help {
+	margin-bottom: 10px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.tg-import-help pre {
+	margin: 6px 0;
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: var(--background-secondary);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+}
+
+.tg-import-text {
+	width: 100%;
+	resize: vertical;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-small);
+}
+
+.tg-entry-modal {
+	width: min(760px, 94vw);
+}
+
+.tg-entry-notes {
+	margin-top: 10px;
+	font-family: inherit;
+	font-size: var(--font-ui-medium);
+	line-height: 1.5;
+	min-height: 12em;
+	max-height: 60vh;
+	resize: vertical;
+}
+
+.tg-import-summary {
+	font-weight: var(--font-semibold);
+	margin-bottom: 6px;
+}
+
+.tg-import-summary.is-empty {
+	font-weight: normal;
+	color: var(--text-muted);
+}
+
+.tg-import-list {
+	max-height: 220px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: var(--font-ui-small);
+}
+
+.tg-import-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+}
+
+.tg-import-date {
+	flex-shrink: 0;
+	width: 52px;
+	color: var(--text-muted);
+}
+
+.tg-import-time {
+	flex-shrink: 0;
+	width: 84px;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.tg-import-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.tg-import-notes {
+	color: var(--text-muted);
+	white-space: pre-wrap;
+}
+
+.tg-import-skipped {
+	margin-top: 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.tg-import-skipped summary {
+	cursor: pointer;
+}
+

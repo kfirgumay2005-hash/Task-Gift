@@ -1,7 +1,7 @@
 # Task Gift — notes for Claude
 
 Obsidian plugin (TypeScript, esbuild) that syncs Google Tasks and shows a board, a calendar and a "gift" mode.
-The repo *is* the installed plugin folder inside the user's vault (`.obsidian/plugins/Task Gift`).
+The repo _is_ the installed plugin folder inside the user's vault (`.obsidian/plugins/Task Gift`).
 
 ## Working here
 
@@ -23,7 +23,7 @@ The user syncs the vault with **Self-hosted LiveSync** on two computers. What wo
    - `Task Gift Settings.md`: settings only (incl. modes). Changes only when a setting changes.
    - `Task Gift Data.md`: tasks, sync state, sign-in. Rewritten on every sync. Still carries a copy of the
      settings for older plugin versions, but that copy is **ignored** when the data note arrives from another device.
-   Keeping fast-changing state and settings in one big note made both devices overwrite each other constantly.
+     Keeping fast-changing state and settings in one big note made both devices overwrite each other constantly.
 2. **Don't rely on the vault `modify` event.** LiveSync sometimes writes straight to disk. `checkFiles()` polls
    mtime+size every 2 s and on window focus; `DataFile.readChanged()` only reads when the stamp changed and never
    hands out the same contents twice.
@@ -50,4 +50,6 @@ not in the settings note (otherwise two devices write the settings note at once 
 - Modes only affect gifts; the board always shows every task. Each mode owns its own sounds, victory and music.
 - User-entered text (titles, notes, list and mode names) gets `dir="auto"` so Hebrew mixed with numbers keeps
   its order.
+- Extra calendars (e.g. shifts) never touch Google: one note each in `Calendars/` next to the data note, written in
+  the same text format the import parses (`src/calendars/format.ts`), so they sync per file and can be edited by hand.
 - Board columns are folded with their eye button (`settings.collapsedColumns`); there is no "show completed" switch.

@@ -1,5 +1,9 @@
-import { setIcon } from "obsidian";
+import { Menu, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
+import { CalendarEntry, timeLabel } from "../calendars/format";
+import type { ExtraCalendar } from "../calendars/store";
+import { taskColorCss } from "../defaults";
+import { CalendarEditModal, CalendarEntryModal, CalendarImportModal } from "../modals/CalendarModals";
 import type { CalendarRange, Task } from "../types";
 import { describeRule, occurrencesBetween } from "../recurrence/rule";
 import { addDays, addMonths, daysInMonth, MONTH_SHORT, parseDate, startOfWeek, today, toDateString, WEEKDAY_SHORT } from "../util/dates";
@@ -9,6 +13,8 @@ import { applyTaskColor, openCardMenu, renderCard } from "./card";
 export interface CalendarUiState {
 	/** Any day inside the shown month / week. */
 	anchor: string;
+	/** Path of the extra calendar shown instead of the tasks; null = the tasks. */
+	calendar: string | null;
 }
 
 interface Entry {
@@ -89,7 +95,10 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 	const s = plugin.settings;
 	const range = s.calendarRange;
 	const { from, to } = visibleRange(range, ui.anchor, s.weekStart);
+	const extra = plugin.calendars.get(ui.calendar);
+	if (!extra) ui.calendar = null;
 	const root = container.createDiv({ cls: `tg-calendar is-${range}` });
+	root.toggleClass("is-extra", !!extra);
 
 	// --- toolbar
 	const bar = root.createDiv({ cls: "tg-cal-toolbar" });
@@ -110,6 +119,7 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 	setIcon(next, "chevron-right");
 	next.addEventListener("click", () => step(1));
 	bar.createDiv({ cls: "tg-cal-title", text: rangeTitle(range, ui.anchor, from, to) });
+	renderCalendarPicker(bar, plugin, ui, extra, rerender);
 
 	const toggle = bar.createDiv({ cls: "tg-mode-toggle", attr: { role: "tablist", "aria-label": "Calendar range" } });
 	for (const r of Object.keys(RANGE_LABELS) as CalendarRange[]) {
@@ -123,7 +133,20 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 	}
 
 	// --- grid
-	const entries = collect(plugin, from, to);
+	const entries = extra ? new Map<string, Entry[]>() : collect(plugin, from, to);
+	const extraEntries = new Map<string, CalendarEntry[]>();
+	if (extra) {
+		for (const e of extra.entries) {
+			if (e.date < from || e.date > to) continue;
+			const list = extraEntries.get(e.date) ?? [];
+			list.push(e);
+			extraEntries.set(e.date, list);
+		}
+	}
+	const addOn = (date: string) => {
+		if (extra) new CalendarEntryModal(plugin.app, plugin.calendars, extra, null, date).open();
+		else plugin.openTaskModal(undefined, { due: date });
+	};
 	const t0 = today();
 	const month = parseDate(ui.anchor).getMonth();
 	const grid = root.createDiv({ cls: "tg-cal-grid" });
@@ -142,11 +165,12 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 		const head = cell.createDiv({ cls: "tg-cal-day-head" });
 		const num = head.createSpan({ cls: "tg-cal-day-num", text: d.getDate() === 1 || range === "week" ? `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}` : String(d.getDate()) });
 		num.setAttr("aria-label", d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }));
-		const add = head.createEl("button", { cls: "clickable-icon tg-cal-add", attr: { "aria-label": "New task on this day" } });
+		const add = head.createEl("button", { cls: "clickable-icon tg-cal-add", attr: { "aria-label": extra ? `New entry in ${extra.name}` : "New task on this day" } });
 		setIcon(add, "plus");
-		add.addEventListener("click", () => plugin.openTaskModal(undefined, { due: date }));
+		add.addEventListener("click", () => addOn(date));
 
 		const items = cell.createDiv({ cls: "tg-cal-items" });
+		if (extra) for (const e of extraEntries.get(date) ?? []) renderEntry(items, plugin, extra, e, range === "week");
 		for (const e of entries.get(date) ?? []) {
 			if (range === "week" && !e.ghost) {
 				renderCard(items, plugin, e.task, { showList: true, draggable: true, checkbox: true, notesLines: 2, colorIn: "calendar" });
@@ -157,10 +181,77 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 
 		// Double-click on an empty spot creates a task on that day.
 		cell.addEventListener("dblclick", (ev) => {
-			if (ev.target === cell || ev.target === items || ev.target === head) plugin.openTaskModal(undefined, { due: date });
+			if (ev.target === cell || ev.target === items || ev.target === head) addOn(date);
 		});
-		enableDrop(cell, plugin, date);
+		if (!extra) enableDrop(cell, plugin, date);
 	}
+}
+
+/** Switches between the tasks and the extra calendars; the Import button fills the shown one from text. */
+function renderCalendarPicker(bar: HTMLElement, plugin: TaskGiftPlugin, ui: CalendarUiState, extra: ExtraCalendar | null, rerender: () => void): void {
+	const show = (cal: ExtraCalendar | null) => {
+		ui.calendar = cal?.path ?? null;
+		rerender();
+	};
+	const picker = bar.createEl("button", { cls: "tg-header-btn tg-cal-picker", attr: { "aria-label": "Choose calendar" } });
+	if (extra?.color) picker.style.setProperty("--tg-task-color", taskColorCss(extra.color));
+	picker.toggleClass("has-color", !!extra?.color);
+	setIcon(picker.createSpan(), extra ? "calendar-range" : "list-checks");
+	picker.createSpan({ text: extra ? extra.name : "Tasks", attr: { dir: "auto" } });
+	setIcon(picker.createSpan({ cls: "tg-mode-chip-caret" }), "chevron-down");
+	picker.addEventListener("click", (e) => {
+		const menu = new Menu();
+		menu.addItem((i) => i.setTitle("Tasks").setIcon("list-checks").setChecked(!extra).onClick(() => show(null)));
+		for (const cal of plugin.calendars.all()) {
+			menu.addItem((i) =>
+				i
+					.setTitle(cal.name)
+					.setIcon("calendar-range")
+					.setChecked(cal.path === extra?.path)
+					.onClick(() => show(cal)),
+			);
+		}
+		menu.addSeparator();
+		menu.addItem((i) => i.setTitle("New calendar…").setIcon("plus").onClick(() => new CalendarEditModal(plugin.app, plugin.calendars, null, show).open()));
+		menu.addItem((i) => i.setTitle("Import text…").setIcon("clipboard-paste").onClick(() => new CalendarImportModal(plugin.app, plugin.calendars, extra, show).open()));
+		if (extra) {
+			menu.addItem((i) => i.setTitle("Edit calendar…").setIcon("pencil").onClick(() => new CalendarEditModal(plugin.app, plugin.calendars, extra, show).open()));
+			menu.addItem((i) => i.setTitle("Open its note").setIcon("file-text").onClick(() => void plugin.app.workspace.openLinkText(extra.path, "", "tab")));
+		}
+		menu.showAtMouseEvent(e);
+	});
+	if (!extra) return;
+	const imp = bar.createEl("button", { cls: "tg-header-btn", attr: { "aria-label": `Add entries to ${extra.name} by pasting text` } });
+	setIcon(imp.createSpan(), "clipboard-paste");
+	imp.createSpan({ text: "Import" });
+	imp.addEventListener("click", () => new CalendarImportModal(plugin.app, plugin.calendars, extra, show).open());
+}
+
+/** An entry of an extra calendar: one line in the month view, with its description in the week view. */
+function renderEntry(parent: HTMLElement, plugin: TaskGiftPlugin, cal: ExtraCalendar, e: CalendarEntry, week: boolean): void {
+	const el = parent.createDiv({ cls: "tg-cal-item tg-cal-entry" });
+	el.toggleClass("is-done", e.done);
+	el.toggleClass("is-week", week);
+	if (cal.color) {
+		el.addClass("has-color");
+		el.style.setProperty("--tg-task-color", taskColorCss(cal.color));
+	}
+	const time = timeLabel(e);
+	el.setAttr("aria-label", [time, e.title, e.notes].filter((x) => x).join("\n"));
+	const cb = el.createEl("button", {
+		cls: "tg-cal-check",
+		attr: { "aria-label": e.done ? "Mark as not done" : "Mark as done", role: "checkbox", "aria-checked": String(e.done) },
+	});
+	setIcon(cb, e.done ? "check-circle-2" : "circle");
+	cb.addEventListener("click", (ev) => {
+		ev.stopPropagation();
+		e.done = !e.done;
+		void plugin.calendars.save(cal);
+	});
+	if (time) el.createSpan({ cls: "tg-cal-item-time", text: time });
+	el.createSpan({ cls: "tg-cal-item-title", text: e.title, attr: { dir: "auto" } });
+	if (week && e.notes) el.createDiv({ cls: "tg-cal-entry-notes", text: e.notes, attr: { dir: "auto" } });
+	el.addEventListener("click", () => new CalendarEntryModal(plugin.app, plugin.calendars, cal, e, e.date).open());
 }
 
 /** A compact one-line entry (month view, and upcoming repeats in the week view). */

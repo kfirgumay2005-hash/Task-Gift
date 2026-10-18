@@ -8,6 +8,8 @@ import { ConnectModal } from "./modals/ConnectModal";
 import { LoginModal } from "./modals/LoginModal";
 import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
+import { calendarsFolderFor, CalendarStore } from "./calendars/store";
+import { CalendarImportModal } from "./modals/CalendarModals";
 import { SyncEngine, SyncStatus } from "./sync/engine";
 import { ChangeSource, TaskStore } from "./sync/store";
 import { activeMode, normalizeModes } from "./modes";
@@ -41,6 +43,8 @@ export default class TaskGiftPlugin extends Plugin {
 	store!: TaskStore;
 	api!: TasksApi;
 	engine!: SyncEngine;
+	/** Extra calendars (e.g. shifts), one note each in a folder next to the data note. */
+	calendars!: CalendarStore;
 	private dataFile!: DataFile<StoredData>;
 	private settingsFile!: DataFile<StoredSettings>;
 	private settingTab!: TaskGiftSettingTab;
@@ -75,6 +79,8 @@ export default class TaskGiftPlugin extends Plugin {
 			onError: (msg) => this.showError(msg),
 		});
 
+		this.calendars = new CalendarStore(this.app, () => calendarsFolderFor(this.dataFile.path), () => this.refreshViewsSoon());
+
 		this.music = new GiftMusic(this.app);
 		// Gift music plays only while a gift view is on screen.
 		const updateMusic = () => this.updateMusic();
@@ -101,6 +107,11 @@ export default class TaskGiftPlugin extends Plugin {
 			callback: () => void this.insertIntoDailyNote(),
 		});
 		this.addCommand({ id: "new-task", name: "New task", callback: () => this.openTaskModal() });
+		this.addCommand({
+			id: "import-calendar-text",
+			name: "Import text into a calendar",
+			callback: () => new CalendarImportModal(this.app, this.calendars, null, () => void this.setBoardView("calendar")).open(),
+		});
 		this.addCommand({ id: "edit-modes", name: "Edit modes", callback: () => void this.openModes() });
 		this.addCommand({ id: "sync-now", name: "Sync now", callback: () => void this.syncNow() });
 		this.addCommand({ id: "full-resync", name: "Full resync with Google", callback: () => void this.syncNow(true) });
@@ -127,6 +138,7 @@ export default class TaskGiftPlugin extends Plugin {
 
 		this.app.workspace.onLayoutReady(async () => {
 			await this.initDataFile();
+			await this.calendars.refresh();
 			this.engine.setStatus(this.auth ? "idle" : "disconnected", this.auth ? "Ready" : "Not connected");
 			if (this.auth) void this.engine.sync();
 			this.restartInterval();
@@ -143,6 +155,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private onVaultFileChanged(file: TFile): void {
 		if (this.dataFile.isDataFile(file)) void this.onDataFileChanged(true);
 		else if (this.settingsFile.isDataFile(file)) void this.onSettingsFileChanged(true);
+		else if (this.calendars.isCalendarPath(file.path)) void this.calendars.refresh();
 	}
 
 	/** Timer / focus: picks up notes changed by a sync tool, and reloads the plugin when it was updated. */
@@ -152,6 +165,7 @@ export default class TaskGiftPlugin extends Plugin {
 		try {
 			await this.onSettingsFileChanged(false);
 			await this.onDataFileChanged(false);
+			await this.calendars.refresh();
 			await this.checkForUpdate();
 		} catch (e) {
 			console.error("[Task Gift] Could not check for changes", e);
