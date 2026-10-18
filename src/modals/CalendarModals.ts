@@ -308,8 +308,8 @@ export class CalendarEntryModal extends Modal {
 		notes.value = d.notes;
 		// Grows with the text, so a long description is shown whole (up to most of the screen, then it scrolls).
 		const fit = () => {
-			notes.style.height = "auto";
-			notes.style.height = `${notes.scrollHeight + 2}px`;
+			notes.setCssStyles({ height: "auto" });
+			notes.setCssStyles({ height: `${notes.scrollHeight + 2}px` });
 		};
 		notes.addEventListener("input", () => {
 			d.notes = notes.value;
