@@ -1,7 +1,6 @@
 import { debounce, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { TasksApi } from "./api/client";
 import { GiftMusic } from "./audio/music";
-import { SOUND_LABELS } from "./audio/sounds";
 import { AuthError, refresh, revoke } from "./auth/oauth";
 import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, VIEW_TYPE } from "./defaults";
 import { ConfirmModal } from "./modals/ConfirmModal";
@@ -11,9 +10,12 @@ import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
 import { SyncEngine, SyncStatus } from "./sync/engine";
 import { ChangeSource, TaskStore } from "./sync/store";
-import { normalizeModes } from "./modes";
-import { DataFile, DEFAULT_DATA_PATH, normalizeDataPath, parse as parseDataFile } from "./storage/dataFile";
-import type { AuthData, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
+import { activeMode, normalizeModes } from "./modes";
+import { normalizeDayColumns, pruneDayColumns } from "./dayColumns";
+import { appendToNote, hasHeading, isDailyNotesEnabled, tasksMarkdown, todayNote, todayNotePath } from "./dailyNote";
+import { today } from "./util/dates";
+import { DATA_NOTE, DataFile, DEFAULT_DATA_PATH, normalizeDataPath, SETTINGS_NOTE, settingsPathFor, StoredData, StoredSettings } from "./storage/dataFile";
+import type { AuthData, BoardView, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
 
 /** The only thing kept in the device-local data.json. */
 interface LocalPointer {
@@ -23,6 +25,15 @@ import { TaskView } from "./views/TaskView";
 
 const LOCAL_SYNC_DEBOUNCE_MS = 1500;
 const OFFLINE_RETRY_MS = 60 * 1000;
+/** Lets a template / Templater finish writing a new daily note before tasks are added below it. */
+const DAILY_NOTE_CREATE_DELAY_MS = 2000;
+/**
+ * How often the data and settings notes (and the plugin's own files) are checked for changes made by a sync
+ * tool. Only their mtime and size are read, unless they changed.
+ */
+const FILE_CHECK_MS = 2000;
+/** The plugin's files whose change (an update arriving through sync) reloads the plugin. */
+const CODE_FILES = ["main.js", "styles.css", "manifest.json"];
 
 export default class TaskGiftPlugin extends Plugin {
 	settings!: TaskGiftSettings;
@@ -30,7 +41,9 @@ export default class TaskGiftPlugin extends Plugin {
 	store!: TaskStore;
 	api!: TasksApi;
 	engine!: SyncEngine;
-	private dataFile!: DataFile;
+	private dataFile!: DataFile<StoredData>;
+	private settingsFile!: DataFile<StoredSettings>;
+	private settingTab!: TaskGiftSettingTab;
 	private music!: GiftMusic;
 
 	private intervalId: number | null = null;
@@ -38,6 +51,14 @@ export default class TaskGiftPlugin extends Plugin {
 	private refreshPromise: Promise<string> | null = null;
 	private lastErrorNotice = "";
 	private statusListeners = new Set<(s: SyncStatus) => void>();
+	/** The day the views were last drawn for; a new day re-draws them (Today column, calendar). */
+	private renderedDay = today();
+	private dailyNoteBusy = false;
+	/** mtime and size of the plugin's own files when loaded; null until first read. */
+	private codeStamp: string | null = null;
+	/** A changed code stamp waiting to stay the same for one more check before reloading. */
+	private pendingCodeStamp: string | null = null;
+	private checkingFiles = false;
 
 	private saveSoon = debounce(() => void this.persist(), 1000, true);
 	private refreshViewsSoon = debounce(() => this.refreshViews(), 100, true);
@@ -66,7 +87,21 @@ export default class TaskGiftPlugin extends Plugin {
 		this.addRibbonIcon("clipboard-plus", "New Google task", () => this.openTaskModal());
 
 		this.addCommand({ id: "open-view", name: "Open board", callback: () => void this.activateView() });
+		this.addCommand({
+			id: "open-calendar",
+			name: "Open calendar",
+			callback: async () => {
+				await this.setBoardView("calendar");
+				await this.activateView();
+			},
+		});
+		this.addCommand({
+			id: "insert-daily-note",
+			name: "Insert today's tasks into daily note",
+			callback: () => void this.insertIntoDailyNote(),
+		});
 		this.addCommand({ id: "new-task", name: "New task", callback: () => this.openTaskModal() });
+		this.addCommand({ id: "edit-modes", name: "Edit modes", callback: () => void this.openModes() });
 		this.addCommand({ id: "sync-now", name: "Sync now", callback: () => void this.syncNow() });
 		this.addCommand({ id: "full-resync", name: "Full resync with Google", callback: () => void this.syncNow(true) });
 		this.addCommand({ id: "sync-all-completed", name: "Download all completed tasks from Google", callback: () => void this.syncAllCompleted() });
@@ -76,16 +111,17 @@ export default class TaskGiftPlugin extends Plugin {
 			callback: () => void this.setGiftMode(!this.settings.giftMode),
 		});
 
-		this.addSettingTab(new TaskGiftSettingTab(this.app, this));
+		this.settingTab = new TaskGiftSettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
 
 		this.registerEvent(
 			this.app.vault.on("modify", (file: TAbstractFile) => {
-				if (file instanceof TFile && this.dataFile.isDataFile(file)) void this.onDataFileChanged();
+				if (file instanceof TFile) this.onVaultFileChanged(file);
 			}),
 		);
 		this.registerEvent(
 			this.app.vault.on("create", (file: TAbstractFile) => {
-				if (file instanceof TFile && this.dataFile.isDataFile(file)) void this.onDataFileChanged();
+				if (file instanceof TFile) this.onVaultFileChanged(file);
 			}),
 		);
 
@@ -94,7 +130,74 @@ export default class TaskGiftPlugin extends Plugin {
 			this.engine.setStatus(this.auth ? "idle" : "disconnected", this.auth ? "Ready" : "Not connected");
 			if (this.auth) void this.engine.sync();
 			this.restartInterval();
+			this.registerDailyNoteHooks();
+			this.registerInterval(window.setInterval(() => this.onMinute(), 60 * 1000));
+			// Sync tools don't always raise the vault's "modify" event (e.g. Self-hosted LiveSync can write straight
+			// to disk), so the notes are also checked on a timer and whenever the window gets focus.
+			this.registerInterval(window.setInterval(() => void this.checkFiles(), FILE_CHECK_MS));
+			this.registerDomEvent(window, "focus", () => void this.checkFiles());
 		});
+		void this.checkForUpdate();
+	}
+
+	private onVaultFileChanged(file: TFile): void {
+		if (this.dataFile.isDataFile(file)) void this.onDataFileChanged(true);
+		else if (this.settingsFile.isDataFile(file)) void this.onSettingsFileChanged(true);
+	}
+
+	/** Timer / focus: picks up notes changed by a sync tool, and reloads the plugin when it was updated. */
+	private async checkFiles(): Promise<void> {
+		if (this.checkingFiles || !this.dataReady) return;
+		this.checkingFiles = true;
+		try {
+			await this.onSettingsFileChanged(false);
+			await this.onDataFileChanged(false);
+			await this.checkForUpdate();
+		} catch (e) {
+			console.error("[Task Gift] Could not check for changes", e);
+		} finally {
+			this.checkingFiles = false;
+		}
+	}
+
+	/**
+	 * Reloads the plugin when its files changed on disk, e.g. a new version that arrived through sync,
+	 * so no device has to turn it off and on. Waits until the files stop changing first.
+	 */
+	private async checkForUpdate(): Promise<void> {
+		const dir = this.manifest.dir;
+		if (!dir) return;
+		const adapter = this.app.vault.adapter;
+		const stats = await Promise.all(CODE_FILES.map((f) => adapter.stat(`${dir}/${f}`)));
+		const stamp = stats.map((st) => (st ? `${st.mtime}:${st.size}` : "-")).join("|");
+		if (this.codeStamp === null || stamp === this.codeStamp) {
+			this.codeStamp = stamp;
+			this.pendingCodeStamp = null;
+			return;
+		}
+		// A sync tool may still be writing the files: reload only once they look the same twice in a row.
+		if (stamp !== this.pendingCodeStamp) {
+			this.pendingCodeStamp = stamp;
+			return;
+		}
+		this.codeStamp = stamp;
+		const plugins = (this.app as unknown as { plugins?: { disablePlugin(id: string): Promise<void>; enablePlugin(id: string): Promise<boolean> } })
+			.plugins;
+		if (!plugins) return;
+		await this.persist();
+		new Notice("Task Gift was updated and reloaded.");
+		const id = this.manifest.id;
+		await plugins.disablePlugin(id);
+		await plugins.enablePlugin(id);
+	}
+
+	/** Once a minute: at a new day, drop finished day columns and re-draw. */
+	private onMinute(): void {
+		const day = today();
+		if (day === this.renderedDay) return;
+		this.renderedDay = day;
+		if (pruneDayColumns(this.settings)) void this.persist();
+		this.refreshViews();
 	}
 
 	onunload(): void {
@@ -113,13 +216,24 @@ export default class TaskGiftPlugin extends Plugin {
 
 	private static mergeSettings(raw: Partial<TaskGiftSettings> | undefined): TaskGiftSettings {
 		const s = Object.assign({}, DEFAULT_SETTINGS, raw ?? {});
-		if (!(s.giftSound in SOUND_LABELS)) s.giftSound = DEFAULT_SETTINGS.giftSound;
-		// Also turns the filter settings of older versions into the first mode.
+		// Also turns the filter and sound settings of older versions into mode settings.
 		normalizeModes(s);
 		if (!Number.isFinite(s.boardZoom)) s.boardZoom = DEFAULT_SETTINGS.boardZoom;
+		if (s.boardView !== "board" && s.boardView !== "calendar") s.boardView = DEFAULT_SETTINGS.boardView;
+		if (s.calendarRange !== "month" && s.calendarRange !== "week") s.calendarRange = DEFAULT_SETTINGS.calendarRange;
+		s.dayColumns = normalizeDayColumns(raw?.dayColumns);
+		pruneDayColumns(s);
+		if (typeof s.dailyNoteHeading !== "string") s.dailyNoteHeading = DEFAULT_SETTINGS.dailyNoteHeading;
 		// Removed settings: the markdown sync note and the board-wide sort.
 		for (const key of ["notePath", "mirrorToNote", "boardSort"]) delete (s as unknown as Record<string, unknown>)[key];
 		s.columnSort = Object.assign({}, raw?.columnSort ?? {});
+		// "Show completed" became the eye button of the Completed column.
+		const legacyShowCompleted = (raw as { showCompleted?: boolean } | undefined)?.showCompleted;
+		if (!Array.isArray(raw?.collapsedColumns)) s.collapsedColumns = legacyShowCompleted ? [] : [...DEFAULT_SETTINGS.collapsedColumns];
+		else s.collapsedColumns = raw.collapsedColumns.filter((k): k is string => typeof k === "string");
+		delete (s as unknown as Record<string, unknown>).showCompleted;
+		if (!Array.isArray(s.customTaskColors)) s.customTaskColors = [];
+		if (!["both", "board", "calendar", "off"].includes(s.taskColorScope)) s.taskColorScope = DEFAULT_SETTINGS.taskColorScope;
 		if (!KEEP_COMPLETED_OPTIONS.includes(s.keepCompletedDays)) {
 			// Snap older free-form values to the nearest allowed option at or above them.
 			s.keepCompletedDays = KEEP_COMPLETED_OPTIONS.find((n) => n >= s.keepCompletedDays) ?? 30;
@@ -129,18 +243,22 @@ export default class TaskGiftPlugin extends Plugin {
 
 	private static mergeStore(raw: Partial<StoreData> | undefined): StoreData {
 		const store = Object.assign(emptyStore(), raw ?? {});
+		if (!store.taskModes || typeof store.taskModes !== "object") store.taskModes = {};
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
 		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
 		return store;
 	}
 
 	/**
-	 * Data lives in a markdown note in the vault. The plugin's own data.json only remembers
-	 * where that note is (it is device-local and does not sync).
+	 * Data lives in two markdown notes in the vault: the settings note and the data note (sync state, sign-in).
+	 * The plugin's own data.json only remembers where the data note is (it is device-local and does not sync);
+	 * the settings note sits next to it.
 	 */
 	private async loadPluginData(): Promise<void> {
 		const local = ((await this.loadData()) ?? {}) as Partial<PluginData> & Partial<LocalPointer>;
-		this.dataFile = new DataFile(this.app, normalizeDataPath(local.dataFilePath ?? DEFAULT_DATA_PATH));
+		const dataPath = normalizeDataPath(local.dataFilePath ?? DEFAULT_DATA_PATH);
+		this.dataFile = new DataFile(this.app, DATA_NOTE, dataPath);
+		this.settingsFile = new DataFile(this.app, SETTINGS_NOTE, settingsPathFor(dataPath));
 
 		let data = await this.dataFile.read();
 		if (!data && (local.settings || local.store)) {
@@ -148,7 +266,12 @@ export default class TaskGiftPlugin extends Plugin {
 			data = { settings: local.settings, auth: local.auth, store: local.store };
 		}
 		this.dataFileMissing = !(await this.dataFile.exists());
-		this.settings = TaskGiftPlugin.mergeSettings(data?.settings);
+		// Before the settings note existed, the settings were part of the data note.
+		const noteSettings = await this.settingsFile.read();
+		this.settings = TaskGiftPlugin.mergeSettings(noteSettings ?? data?.settings);
+		// Only write the settings note after a change made here. Writing back what was just read could put an
+		// outdated copy over a newer one (e.g. modes added on another device) that the sync tool hasn't delivered yet.
+		if (noteSettings) this.settingsFile.adopt(this.settings);
 		this.auth = data?.auth ?? null;
 		this.loadedStore = TaskGiftPlugin.mergeStore(data?.store);
 	}
@@ -159,8 +282,11 @@ export default class TaskGiftPlugin extends Plugin {
 			const found = this.dataFile.findInVault();
 			if (found) {
 				this.dataFile.path = found;
+				this.settingsFile.path = settingsPathFor(found);
 				const data = await this.dataFile.read();
-				if (data) this.applyExternal(data, true);
+				const settings = await this.settingsFile.read();
+				if (data || settings) this.applyExternal({ ...data, ...(settings ? { settings } : {}) }, true);
+				if (settings) this.settingsFile.adopt(this.settings);
 			}
 			await this.savePointer();
 		}
@@ -175,6 +301,9 @@ export default class TaskGiftPlugin extends Plugin {
 
 	async persist(): Promise<void> {
 		if (!this.store || !this.dataReady) return;
+		// Each note is only rewritten when its own contents changed.
+		await this.settingsFile.write(this.settings);
+		// The settings stay in the data note too, for devices still on an older Task Gift version.
 		const data: PluginData = { settings: this.settings, auth: this.auth, store: this.store.data };
 		await this.dataFile.write(data);
 	}
@@ -183,10 +312,15 @@ export default class TaskGiftPlugin extends Plugin {
 		return this.dataFile.path;
 	}
 
-	/** Moves the data note (settings "Apply" button). Loads an existing data note at the target instead, after confirmation. */
+	settingsFilePath(): string {
+		return this.settingsFile.path;
+	}
+
+	/** Moves the data and settings notes (settings "Apply" button). Loads existing notes at the target instead, after confirmation. */
 	async changeDataFilePath(input: string): Promise<boolean> {
 		const target = normalizeDataPath(input);
 		if (target === this.dataFile.path) return true;
+		const settingsTarget = settingsPathFor(target);
 		if (await this.dataFile.exists(target)) {
 			const existing = await this.dataFile.read(target);
 			if (!existing) {
@@ -204,11 +338,15 @@ export default class TaskGiftPlugin extends Plugin {
 				).open(),
 			);
 			if (!ok) return false;
+			const settings = await this.settingsFile.read(settingsTarget);
 			this.dataFile.path = target;
-			this.applyExternal(existing, true);
+			this.settingsFile.path = settingsTarget;
+			this.applyExternal({ ...existing, ...(settings ? { settings } : {}) }, true);
 		} else {
 			try {
 				await this.dataFile.moveTo(target);
+				if (await this.settingsFile.exists(settingsTarget)) this.settingsFile.path = settingsTarget;
+				else await this.settingsFile.moveTo(settingsTarget);
 			} catch (e) {
 				new Notice(`Could not move the data file: ${e instanceof Error ? e.message : String(e)}`);
 				return false;
@@ -225,11 +363,13 @@ export default class TaskGiftPlugin extends Plugin {
 	 * Settings, sign-in and gift state are taken over; repeat rules and times are merged;
 	 * tasks are reconciled through the next Google sync.
 	 */
-	private applyExternal(incoming: Partial<PluginData>, replace: boolean): void {
+	private applyExternal(incoming: Omit<Partial<PluginData>, "settings"> & { settings?: StoredSettings }, replace: boolean): void {
 		if (incoming.settings) {
 			const prevInterval = this.settings.syncIntervalMinutes;
 			this.settings = TaskGiftPlugin.mergeSettings(incoming.settings);
 			if (prevInterval !== this.settings.syncIntervalMinutes && this.intervalId !== null) this.restartInterval();
+			// Show the new values if the settings are open on this device.
+			if (this.settingTab.containerEl.isShown()) this.settingTab.update();
 		}
 		const a = incoming.auth;
 		if (a && (replace || !this.auth || a.refreshToken !== this.auth.refreshToken || a.expiresAt > this.auth.expiresAt)) this.auth = a;
@@ -242,6 +382,8 @@ export default class TaskGiftPlugin extends Plugin {
 			} else {
 				d.recurrence = { ...d.recurrence, ...inc.recurrence };
 				d.times = { ...d.times, ...inc.times };
+				d.colors = { ...d.colors, ...inc.colors };
+				d.taskModes = { ...d.taskModes, ...inc.taskModes };
 				d.spawned = { ...d.spawned, ...inc.spawned };
 				d.aliases = { ...d.aliases, ...inc.aliases };
 				d.gift = inc.gift;
@@ -253,12 +395,25 @@ export default class TaskGiftPlugin extends Plugin {
 		if (replace && this.auth && this.engine) this.syncSoon();
 	}
 
-	private async onDataFileChanged(): Promise<void> {
-		const raw = await this.dataFile.readRaw();
+	/** The data note changed on another device: take over sign-in and gift state (settings come from their own note). */
+	private async onDataFileChanged(force: boolean): Promise<void> {
+		const raw = await this.dataFile.readChanged(force);
 		if (raw === null || this.dataFile.isOwnWrite(raw)) return;
-		const data = parseDataFile(raw);
+		const data = this.dataFile.parse(raw);
 		if (!data) return;
-		this.applyExternal(data, false);
+		this.applyExternal({ auth: data.auth, store: data.store }, false);
+	}
+
+	/** The settings note changed on another device: apply the settings right away. */
+	private async onSettingsFileChanged(force: boolean): Promise<void> {
+		const raw = await this.settingsFile.readChanged(force);
+		if (raw === null || this.settingsFile.isOwnWrite(raw)) return;
+		const settings = this.settingsFile.parse(raw);
+		if (!settings) return;
+		this.applyExternal({ settings }, false);
+		// Already in the note: don't write it back unless something changes here.
+		this.settingsFile.adopt(this.settings);
+		new Notice("Task Gift: settings updated from another device.");
 	}
 
 	async saveSettings(): Promise<void> {
@@ -444,7 +599,25 @@ export default class TaskGiftPlugin extends Plugin {
 	// ------------------------------------------------------------ UI
 
 	openTaskModal(task?: Task, defaults?: TaskModalOptions["defaults"]): void {
-		new TaskModal(this.app, this.store, { task, defaults }).open();
+		const colors =
+			this.settings.taskColorScope === "off"
+				? undefined
+				: {
+						custom: this.settings.customTaskColors,
+						save: (list: string[]) => {
+							this.settings.customTaskColors = list;
+							void this.saveSettings();
+						},
+					};
+		const modes = this.settings.modes.map((m) => ({ id: m.id, name: m.name }));
+		new TaskModal(this.app, this.store, { task, defaults, colors, modes }).open();
+	}
+
+	/** Leaves gift mode and shows the board or the calendar. */
+	async setBoardView(view: BoardView): Promise<void> {
+		this.settings.giftMode = false;
+		this.settings.boardView = view;
+		await this.saveSettings();
 	}
 
 	async setGiftMode(on: boolean): Promise<void> {
@@ -461,10 +634,8 @@ export default class TaskGiftPlugin extends Plugin {
 	}
 
 	updateMusic(): void {
-		const onScreen =
-			this.settings.giftMode &&
-			this.app.workspace.getLeavesOfType(VIEW_TYPE).some((leaf) => leaf.view instanceof TaskView && leaf.view.containerEl.isShown());
-		this.music.update(this.settings, onScreen);
+		const onScreen = this.app.workspace.getLeavesOfType(VIEW_TYPE).some((leaf) => leaf.view instanceof TaskView && leaf.view.showsGift());
+		this.music.update(activeMode(this.settings), onScreen);
 	}
 
 	/** Switches the active mode (header menu). */
@@ -472,6 +643,103 @@ export default class TaskGiftPlugin extends Plugin {
 		if (id === this.settings.activeModeId || !this.settings.modes.some((m) => m.id === id)) return;
 		this.settings.activeModeId = id;
 		await this.saveSettings();
+	}
+
+	// ------------------------------------------------------------ daily note
+
+	private registerDailyNoteHooks(): void {
+		// Registered after layout ready, so the "create" events of the initial vault load are not seen.
+		this.registerEvent(
+			this.app.vault.on("create", (file: TAbstractFile) => {
+				if (file instanceof TFile && this.settings.dailyNoteEnabled && file.path === todayNotePath(this.app)) {
+					window.setTimeout(() => void this.autoInsertDailyNote(), DAILY_NOTE_CREATE_DELAY_MS);
+				}
+			}),
+		);
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => {
+				if (file && this.settings.dailyNoteEnabled && file.path === todayNotePath(this.app)) void this.autoInsertDailyNote();
+			}),
+		);
+	}
+
+	/** Adds today's tasks to today's daily note once a day (setting "Insert tasks into the daily note"). */
+	private async autoInsertDailyNote(): Promise<void> {
+		const s = this.settings;
+		const day = today();
+		if (!s.dailyNoteEnabled || s.dailyNoteInsertedOn === day || this.dailyNoteBusy) return;
+		const file = todayNote(this.app);
+		if (!file) return;
+		this.dailyNoteBusy = true;
+		try {
+			const content = await this.app.vault.read(file);
+			// Added before (on another device, or by hand with the same heading).
+			if (!hasHeading(content, s.dailyNoteHeading)) {
+				const { text, count } = tasksMarkdown(this.store, s);
+				// Nothing synced yet (or nothing due): try again next time the note is opened.
+				if (!count) return;
+				await appendToNote(this.app, file, text);
+			}
+			s.dailyNoteInsertedOn = day;
+			await this.persist();
+		} finally {
+			this.dailyNoteBusy = false;
+		}
+	}
+
+	/** Command / menu: adds today's tasks below the daily note's content, creating the note if needed. */
+	async insertIntoDailyNote(): Promise<void> {
+		if (this.dailyNoteBusy) return;
+		const { text, count } = tasksMarkdown(this.store, this.settings);
+		if (!count) {
+			new Notice("No open tasks due today.");
+			return;
+		}
+		this.dailyNoteBusy = true;
+		try {
+			let file = todayNote(this.app);
+			if (!file) file = await this.createDailyNote();
+			if (!file) {
+				new Notice("Could not create today's daily note.");
+				return;
+			}
+			await appendToNote(this.app, file, text);
+			// Don't add them a second time automatically today.
+			this.settings.dailyNoteInsertedOn = today();
+			await this.persist();
+			new Notice(`Added ${count} task${count === 1 ? "" : "s"} to ${file.basename}.`);
+		} catch (e) {
+			new Notice(`Could not update the daily note: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			this.dailyNoteBusy = false;
+		}
+	}
+
+	/** Creates today's note with the Daily notes plugin (so its template applies), or as an empty note. */
+	private async createDailyNote(): Promise<TFile | null> {
+		const commands = (this.app as unknown as { commands?: { executeCommandById(id: string): boolean } }).commands;
+		if (isDailyNotesEnabled(this.app) && commands?.executeCommandById("daily-notes")) {
+			for (let i = 0; i < 20; i++) {
+				await new Promise((r) => window.setTimeout(r, 150));
+				const f = todayNote(this.app);
+				if (f) {
+					await new Promise((r) => window.setTimeout(r, DAILY_NOTE_CREATE_DELAY_MS));
+					return f;
+				}
+			}
+		}
+		const path = todayNotePath(this.app);
+		const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+		if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+		return this.app.vault.create(path, "");
+	}
+
+	/** Opens the Modes page of the Task Gift view (modes are edited there, not in the settings tab). */
+	async openModes(): Promise<void> {
+		(this.app as unknown as { setting?: { close(): void } }).setting?.close();
+		await this.activateView();
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof TaskView) leaf.view.showModes();
+		this.updateMusic();
 	}
 
 	async activateView(): Promise<void> {

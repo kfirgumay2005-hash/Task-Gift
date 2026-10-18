@@ -89,3 +89,10 @@ export function friendlyDate(s: string): string {
 	const base = `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
 	return d.getFullYear() === new Date().getFullYear() ? base : `${base}, ${d.getFullYear()}`;
 }
+
+/** "Oct 20", with the year when it isn't the current one. */
+export function shortDate(s: string): string {
+	const d = parseDate(s);
+	const base = `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
+	return d.getFullYear() === new Date().getFullYear() ? base : `${base}, ${d.getFullYear()}`;
+}

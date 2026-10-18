@@ -2099,3 +2099,531 @@
 		opacity: 0;
 	}
 }
+
+/* ------------------------------------------------------------- header search (all tasks) */
+
+.tg-global-search {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.tg-global-search-input {
+	width: 200px;
+	max-width: 50vw;
+	height: 28px;
+	font-size: var(--font-ui-small);
+}
+
+.tg-search-results {
+	height: 100%;
+	overflow-y: auto;
+	padding: 14px;
+	box-sizing: border-box;
+}
+
+.tg-search-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 12px;
+	max-width: 720px;
+	margin: 0 auto 12px;
+}
+
+.tg-search-count {
+	font-weight: var(--font-semibold);
+}
+
+.tg-search-scope {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.tg-search-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: 720px;
+	margin: 0 auto;
+}
+
+/* ------------------------------------------------------------- day columns */
+
+.tg-add-column {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: auto;
+	padding: 10px 14px;
+	border-radius: var(--tg-radius);
+	border: 1px dashed var(--background-modifier-border);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.tg-add-column:hover {
+	color: var(--text-normal);
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.tg-add-column svg {
+	width: 15px;
+	height: 15px;
+}
+
+/* ------------------------------------------------------------- calendar */
+
+.tg-view.is-calendar-mode .tg-body {
+	overflow: hidden;
+}
+
+.tg-calendar {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	box-sizing: border-box;
+	padding: 10px 14px 14px;
+	gap: 10px;
+}
+
+.tg-cal-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.tg-cal-nav {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.tg-cal-title {
+	flex: 1;
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	white-space: nowrap;
+}
+
+.tg-cal-grid {
+	flex: 1;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+	grid-template-rows: auto repeat(var(--tg-cal-rows, 6), minmax(92px, 1fr));
+	gap: 4px;
+	overflow: auto;
+}
+
+.tg-calendar.is-week .tg-cal-grid {
+	grid-template-columns: repeat(7, minmax(160px, 1fr));
+	grid-template-rows: auto minmax(0, 1fr);
+}
+
+.tg-cal-weekday {
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding: 2px 0;
+}
+
+.tg-cal-day {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	border: 1px solid transparent;
+	overflow: hidden;
+	transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.tg-cal-day.is-outside {
+	opacity: 0.55;
+}
+
+.tg-cal-day.is-today {
+	border-color: var(--interactive-accent);
+}
+
+.tg-cal-day.is-drop-target {
+	border-color: var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+}
+
+.tg-cal-day-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 4px 2px 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.tg-cal-day.is-today .tg-cal-day-num {
+	color: var(--interactive-accent);
+	font-weight: var(--font-semibold);
+}
+
+.tg-cal-add {
+	padding: 1px;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+
+.tg-cal-add svg {
+	width: 13px;
+	height: 13px;
+}
+
+.tg-cal-day:hover .tg-cal-add,
+.tg-cal-add:focus-visible {
+	opacity: 1;
+}
+
+.tg-cal-items {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 0 4px 6px;
+}
+
+.tg-calendar.is-week .tg-cal-items {
+	gap: 6px;
+}
+
+.tg-cal-item {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	padding: 2px 6px 2px 3px;
+	border-radius: 6px;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.35;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+}
+
+.tg-cal-item:hover {
+	border-color: var(--background-modifier-border-hover);
+}
+
+.tg-cal-item[draggable="true"] {
+	cursor: grab;
+}
+
+.tg-cal-item.is-dragging {
+	opacity: 0.4;
+}
+
+.tg-cal-item.is-overdue {
+	border-left: 3px solid var(--color-red);
+}
+
+.tg-cal-item.is-done .tg-cal-item-title {
+	text-decoration: line-through;
+	color: var(--text-faint);
+}
+
+/* Upcoming repeats: computed for display only, not real tasks yet. */
+.tg-cal-item.is-ghost {
+	background: transparent;
+	border-style: dashed;
+	color: var(--text-muted);
+	padding-left: 6px;
+}
+
+.tg-cal-check {
+	display: inline-flex;
+	flex-shrink: 0;
+	padding: 0;
+	height: auto;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: var(--text-faint);
+	cursor: pointer;
+}
+
+.tg-cal-check:hover,
+.tg-cal-item.is-done .tg-cal-check {
+	color: var(--interactive-accent);
+}
+
+.tg-cal-check svg,
+.tg-cal-item-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+.tg-cal-item-icon {
+	display: inline-flex;
+	flex-shrink: 0;
+	color: var(--text-faint);
+}
+
+.tg-cal-item-time {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.tg-cal-item-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- narrow screens */
+
+@media (max-width: 600px) {
+	.tg-mode-btn-label {
+		display: none;
+	}
+
+	.tg-calendar {
+		padding: 8px;
+	}
+
+	.tg-calendar.is-month .tg-cal-grid {
+		grid-template-rows: auto repeat(var(--tg-cal-rows, 6), minmax(64px, 1fr));
+		gap: 2px;
+	}
+
+	.tg-calendar.is-month .tg-cal-item {
+		padding: 1px 3px;
+	}
+
+	.tg-calendar.is-month .tg-cal-check,
+	.tg-calendar.is-month .tg-cal-item-time {
+		display: none;
+	}
+
+	.tg-global-search-input {
+		width: 140px;
+	}
+}
+
+/* ------------------------------------------------------------- task colors */
+
+.tg-card.has-color {
+	background: color-mix(in srgb, var(--tg-task-color) 8%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--tg-task-color) 35%, var(--background-modifier-border));
+	box-shadow: inset 4px 0 0 var(--tg-task-color), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.tg-card.has-color:hover {
+	box-shadow: inset 4px 0 0 var(--tg-task-color), 0 3px 10px rgba(0, 0, 0, 0.08);
+}
+
+.tg-cal-item.has-color {
+	background: color-mix(in srgb, var(--tg-task-color) 18%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--tg-task-color) 45%, var(--background-modifier-border));
+}
+
+.tg-cal-item.has-color.is-ghost {
+	background: color-mix(in srgb, var(--tg-task-color) 6%, transparent);
+}
+
+/* Overdue keeps its red edge, whatever the task's color. */
+.tg-cal-item.has-color.is-overdue {
+	border-left-color: var(--color-red);
+}
+
+.tg-color-swatches {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.tg-color-swatch {
+	box-sizing: border-box;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	background-color: var(--tg-task-color);
+	border: 1px solid color-mix(in srgb, var(--text-normal) 15%, transparent);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: transform 100ms ease;
+}
+
+.tg-color-swatch:hover {
+	transform: scale(1.12);
+}
+
+.tg-color-swatch:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 2px;
+}
+
+.tg-color-swatch.is-none,
+.tg-color-swatch.is-add {
+	background-color: var(--background-primary);
+	border: 1px dashed var(--background-modifier-border-hover);
+	color: var(--text-muted);
+}
+
+.tg-color-swatch.is-none {
+	border-style: solid;
+}
+
+.tg-color-swatch svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tg-color-swatch.is-active {
+	box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
+}
+
+/* Opened by the "+" swatch; kept in the layout (not display: none) so the picker can open. */
+.tg-color-input {
+	position: absolute;
+	width: 0;
+	height: 0;
+	padding: 0;
+	border: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* ------------------------------------------------------------- folded columns (eye button) */
+
+.tg-column.is-collapsed {
+	flex: 0 0 auto;
+	width: 44px;
+	align-self: stretch;
+	overflow: hidden;
+}
+
+.tg-column.is-collapsed .tg-column-header {
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 4px;
+	height: 100%;
+}
+
+/* The eye stays on top, right under the icon, so the column can be opened again. */
+.tg-column.is-collapsed .tg-column-eye {
+	order: -1;
+}
+
+.tg-column.is-collapsed .tg-column-title {
+	flex: 0 1 auto;
+	writing-mode: vertical-rl;
+	text-orientation: mixed;
+	color: var(--text-muted);
+}
+
+.tg-column-header .tg-column-eye {
+	color: var(--text-faint);
+}
+
+.tg-column.is-collapsed .tg-column-eye {
+	color: var(--interactive-accent);
+}
+
+/* ------------------------------------------------------------- task modes (task window) */
+
+.tg-modes-field {
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+}
+
+/* ------------------------------------------------------------- modes page (view) */
+
+.tg-view.is-modes-mode .tg-body {
+	overflow: hidden;
+}
+
+.tg-modes-page {
+	height: 100%;
+	overflow-y: auto;
+	padding: 16px;
+}
+
+.tg-modes-inner {
+	max-width: 760px;
+	margin: 0 auto;
+	padding-bottom: 32px;
+}
+
+.tg-modes-heading {
+	margin: 0 0 4px;
+}
+
+.tg-modes-intro,
+.tg-modes-summary,
+.tg-modes-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.tg-modes-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 16px 0 8px;
+}
+
+.tg-modes-tab,
+.tg-modes-add {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.tg-modes-badge {
+	font-size: var(--font-ui-smaller);
+	padding: 0 6px;
+	border-radius: 999px;
+	background: var(--background-modifier-hover);
+}
+
+.tg-modes-tab.is-active .tg-modes-badge {
+	background: color-mix(in srgb, var(--text-on-accent) 25%, transparent);
+}
+
+.tg-modes-add-icon {
+	display: inline-flex;
+}
+
+.tg-modes-add-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tg-modes-editor {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 8px;
+}
+
+.tg-modes-empty {
+	padding: 6px 0 10px;
+}
+
+.tg-modes-editor .tg-bg-thumb {
+	margin-right: 12px;
+}

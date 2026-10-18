@@ -1,7 +1,8 @@
 import { Menu, Notice, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
-import type { BoardSort, Task } from "../types";
-import { filterFor, isListIncluded, matchesDateFilter } from "../filters/dates";
+import type { BoardSort, DayColumn, Task } from "../types";
+import { dayColumnKey, dayColumnTitle, newDayColumnId, visibleDayColumns } from "../dayColumns";
+import { DayColumnModal } from "../modals/DayColumnModal";
 import { addDays, today } from "../util/dates";
 import { renderCard } from "./card";
 
@@ -28,6 +29,8 @@ interface Column {
 	/** Defaults for the "+" button. */
 	newDefaults?: { listId?: string; due?: string | null };
 	accent?: string;
+	/** Extra actions in a ⋯ menu in the column header. */
+	menu?: (menu: Menu) => void;
 }
 
 function byDueThenPosition(a: Task, b: Task): number {
@@ -67,17 +70,6 @@ export function matchesQuery(t: Task, query: string): boolean {
 	return t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q);
 }
 
-/** Tasks shown in the board, after list / date / completed filters. */
-export function boardTasks(plugin: TaskGiftPlugin): Task[] {
-	const s = plugin.settings;
-	const filter = filterFor(s, "board");
-	return plugin.store
-		.all()
-		.filter((t) => isListIncluded(s, t.listId, "board"))
-		.filter((t) => s.grouping === "status" || s.showCompleted || t.status !== "completed")
-		.filter((t) => matchesDateFilter(t, filter, s.weekStart));
-}
-
 const SORT_LABELS: Record<BoardSort, string> = { default: "Default order", dateAsc: "Date: oldest first", dateDesc: "Date: newest first" };
 
 function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
@@ -86,18 +78,29 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	const t0 = today();
 	const t1 = addDays(t0, 1);
 
+	const completed: Column = {
+		key: "completed",
+		title: "Completed",
+		icon: "check-circle-2",
+		tasks: [],
+		onDrop: (t) => store.setCompleted(t.id, true),
+		accent: "done",
+	};
+
 	if (s.grouping === "list") {
-		return store
-			.lists()
-			.filter((l) => isListIncluded(s, l.id, "board"))
-			.map((l) => ({
+		const cols = store.lists().map(
+			(l): Column => ({
 				key: l.id,
 				title: l.title,
 				icon: "list",
-				tasks: tasks.filter((t) => t.listId === l.id),
+				tasks: tasks.filter((t) => t.listId === l.id && t.status !== "completed"),
 				onDrop: (task) => store.update(task.id, { listId: l.id }),
 				newDefaults: { listId: l.id },
-			}));
+			}),
+		);
+		// Completed tasks of every list get their own column, which can be folded away with its eye button.
+		completed.tasks = tasks.filter((t) => t.status === "completed");
+		return completed.tasks.length ? [...cols, completed] : cols;
 	}
 
 	if (s.grouping === "status") {
@@ -121,10 +124,17 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 		];
 	}
 
+	const dayCols = visibleDayColumns(s);
+	const dayColByDate = new Map<string, DayColumn>();
+	for (const c of dayCols) if (!dayColByDate.has(c.date)) dayColByDate.set(c.date, c);
 	const group = (t: Task): string => {
 		// Completed tasks are never overdue; they get their own column.
 		if (t.status === "completed") return "completed";
-		if (!t.due) return "none";
+		// Tasks without a date have no column here (they show when grouped by list or status).
+		if (!t.due) return "";
+		// A day column takes the tasks of its day.
+		const dc = dayColByDate.get(t.due);
+		if (dc) return dayColumnKey(dc);
 		if (t.due < t0) return "overdue";
 		if (t.due === t0) return "today";
 		if (t.due === t1) return "tomorrow";
@@ -143,15 +153,39 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 			onDrop: (t) => setDue(t, t.due && t.due > t1 ? t.due : addDays(t0, 2)),
 			newDefaults: { due: addDays(t0, 2) },
 		},
-		{ key: "none", title: "No date", icon: "calendar-off", tasks: [], onDrop: (t) => setDue(t, null), newDefaults: { due: null } },
-		{ key: "completed", title: "Completed", icon: "check-circle-2", tasks: [], onDrop: (t) => store.setCompleted(t.id, true), accent: "done" },
+		...dayCols.map(
+			(c): Column => ({
+				key: dayColumnKey(c),
+				title: dayColumnTitle(c),
+				icon: "calendar-days",
+				tasks: [],
+				onDrop: (t) => setDue(t, c.date),
+				newDefaults: { due: c.date },
+				accent: c.date < t0 ? "overdue" : c.date === t0 ? "today" : undefined,
+				menu: (menu) => {
+					menu.addItem((i) => i.setTitle("Edit column…").setIcon("pencil").onClick(() => openDayColumnModal(plugin, c)));
+					menu.addItem((i) =>
+						i
+							.setTitle("Remove column")
+							.setIcon("trash-2")
+							.setWarning(true)
+							.onClick(() => {
+								s.dayColumns = s.dayColumns.filter((x) => x.id !== c.id);
+								delete s.columnSort[dayColumnKey(c)];
+								void plugin.saveSettings();
+							}),
+					);
+				},
+			}),
+		),
+		completed,
 	];
 	for (const t of tasks) cols.find((c) => c.key === group(t))?.tasks.push(t);
 	return cols.filter((c) => (c.key !== "overdue" && c.key !== "completed") || c.tasks.length > 0);
 }
 
 export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, onZoom: (zoom: number) => void): void {
-	const columns = buildColumns(plugin, boardTasks(plugin));
+	const columns = buildColumns(plugin, plugin.store.all());
 	const board = container.createDiv({ cls: "tg-board" });
 	board.style.setProperty("--tg-zoom", String(plugin.settings.boardZoom / 100));
 	enableBoardNavigation(board, plugin, ui, onZoom);
@@ -159,11 +193,29 @@ export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: 
 	if (!columns.length) {
 		const empty = board.createDiv({ cls: "tg-empty" });
 		empty.createDiv({ cls: "tg-empty-emoji", text: "🗂️" });
-		empty.createDiv({ text: plugin.isConnected() ? "No task lists to show. Check the included lists in settings." : "Connect your Google account in settings to get started." });
+		empty.createDiv({ text: plugin.isConnected() ? "No task lists to show yet." : "Connect your Google account in settings to get started." });
 		return;
 	}
 
 	for (const col of columns) renderColumn(board, plugin, ui, col);
+
+	if (plugin.settings.grouping === "date") {
+		const add = board.createEl("button", { cls: "tg-add-column", attr: { "aria-label": "Add a column for a chosen day" } });
+		setIcon(add.createSpan(), "calendar-plus");
+		add.createSpan({ text: "Add day column" });
+		add.addEventListener("click", () => openDayColumnModal(plugin, null));
+	}
+}
+
+/** Adds a day column, or edits `existing`. */
+export function openDayColumnModal(plugin: TaskGiftPlugin, existing: DayColumn | null): void {
+	const s = plugin.settings;
+	const taken = s.dayColumns.filter((c) => c.id !== existing?.id).map((c) => c.date);
+	new DayColumnModal(plugin.app, existing, taken, (fields) => {
+		if (existing) Object.assign(existing, fields);
+		else s.dayColumns.push({ id: newDayColumnId(), ...fields });
+		void plugin.saveSettings();
+	}).open();
 }
 
 /**
@@ -221,8 +273,29 @@ function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSta
 	if (col.accent) colEl.addClass(`is-${col.accent}`);
 	const header = colEl.createDiv({ cls: "tg-column-header" });
 	setIcon(header.createSpan({ cls: "tg-column-icon" }), col.icon);
-	header.createSpan({ cls: "tg-column-title", text: col.title });
+	header.createSpan({ cls: "tg-column-title", text: col.title, attr: { dir: "auto" } });
 	const countEl = header.createSpan({ cls: "tg-column-count" });
+
+	// --- eye: folds the column so its tasks are hidden (saved)
+	const collapsed = settings.collapsedColumns.includes(col.key);
+	const eyeBtn = header.createEl("button", {
+		cls: "clickable-icon tg-column-tool tg-column-eye",
+		attr: { "aria-label": collapsed ? `Show ${col.title}` : `Hide ${col.title}` },
+	});
+	setIcon(eyeBtn, collapsed ? "eye-off" : "eye");
+	eyeBtn.addEventListener("click", () => {
+		settings.collapsedColumns = collapsed ? settings.collapsedColumns.filter((k) => k !== col.key) : [...settings.collapsedColumns, col.key];
+		void plugin.saveSettings();
+	});
+	if (collapsed) {
+		colEl.addClass("is-collapsed");
+		// Completed-only columns count their (completed) cards; others count open tasks.
+		const allDone = col.tasks.every((t) => t.status === "completed");
+		countEl.setText(String(allDone ? col.tasks.length : col.tasks.filter((t) => t.status !== "completed").length));
+		colEl.setAttr("aria-label", `${col.title} (hidden)`);
+		addDropTarget(colEl, plugin, col);
+		return;
+	}
 
 	// --- search (this column only)
 	const searchBtn = header.createEl("button", { cls: "clickable-icon tg-column-tool", attr: { "aria-label": `Search in ${col.title}` } });
@@ -249,6 +322,17 @@ function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSta
 		menu.showAtMouseEvent(e);
 	});
 
+	if (col.menu) {
+		const fillMenu = col.menu;
+		const moreBtn = header.createEl("button", { cls: "clickable-icon tg-column-tool", attr: { "aria-label": "Column actions" } });
+		setIcon(moreBtn, "more-horizontal");
+		moreBtn.addEventListener("click", (e) => {
+			const menu = new Menu();
+			fillMenu(menu);
+			menu.showAtMouseEvent(e);
+		});
+	}
+
 	if (col.newDefaults) {
 		const add = header.createEl("button", { cls: "clickable-icon tg-column-add", attr: { "aria-label": `Add task to ${col.title}` } });
 		setIcon(add, "plus");
@@ -272,7 +356,7 @@ function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSta
 		const shown = col.tasks.filter((t) => matchesQuery(t, query)).sort(comparator(sort));
 		list.empty();
 		for (const t of shown) {
-			renderCard(list, plugin, t, { showList: settings.grouping !== "list", draggable: true, checkbox: true });
+			renderCard(list, plugin, t, { showList: settings.grouping !== "list", draggable: true, checkbox: true, colorIn: "board" });
 		}
 		if (!shown.length) list.createDiv({ cls: "tg-column-empty", text: searching ? "No matches" : col.onDrop ? "Drop tasks here" : "Nothing here" });
 		const open = shown.filter((t) => t.status !== "completed").length;
@@ -315,7 +399,12 @@ function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSta
 	});
 
 	fill();
+	addDropTarget(colEl, plugin, col);
+}
 
+/** Lets cards be dropped onto the column (also while it is folded). */
+function addDropTarget(colEl: HTMLElement, plugin: TaskGiftPlugin, col: Column): void {
+	const settings = plugin.settings;
 	if (col.onDrop) {
 		const onDrop = col.onDrop;
 		colEl.addEventListener("dragover", (e) => {

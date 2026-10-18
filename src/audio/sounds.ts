@@ -1,5 +1,5 @@
 import { App, Notice, TFile } from "obsidian";
-import type { GiftSound, TaskGiftSettings } from "../types";
+import type { GiftSound, ModeAudio } from "../types";
 import birthdayMp3 from "../../sounds/happy-birthday.mp3";
 
 type BuiltInSound = Exclude<GiftSound, "random" | "custom">;
@@ -98,7 +98,7 @@ function playFile(app: App, path: string, volume: number): void {
 }
 
 /** Plays the configured gift sound. `force` plays even when sounds are turned off (settings preview). */
-export function playGiftSound(app: App, s: TaskGiftSettings, force = false): void {
+export function playGiftSound(app: App, s: ModeAudio, force = false): void {
 	if (!s.giftSoundEnabled && !force) return;
 	const volume = Math.min(1, Math.max(0, s.giftSoundVolume / 100));
 	if (volume === 0) return;
@@ -116,7 +116,7 @@ export function playGiftSound(app: App, s: TaskGiftSettings, force = false): voi
 }
 
 /** Plays the victory music (an audio file from the vault) when a gift is finished. */
-export function playVictorySound(app: App, s: TaskGiftSettings, force = false): void {
+export function playVictorySound(app: App, s: ModeAudio, force = false): void {
 	if (!s.victorySoundEnabled && !force) return;
 	if (!s.victorySoundFile) {
 		if (force) new Notice("Choose an audio file first.");

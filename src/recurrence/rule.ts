@@ -109,6 +109,25 @@ export function nextOccurrence(
 	return { due, rule: { ...rule, occurrence } };
 }
 
+/**
+ * Upcoming due dates after `currentDue` that fall in [from, to], honouring the rule's end.
+ * Only used for display (calendar): no task is created for them.
+ */
+export function occurrencesBetween(rule: RecurrenceRule, currentDue: string, from: string, to: string): string[] {
+	const out: string[] = [];
+	let due = currentDue;
+	let occurrence = rule.occurrence;
+	for (let i = 0; i < 5000 && out.length < 400; i++) {
+		due = computeNext(rule, due);
+		occurrence++;
+		if (rule.end.type === "count" && occurrence > rule.end.count) break;
+		if (rule.end.type === "until" && due > rule.end.date) break;
+		if (due > to) break;
+		if (due >= from) out.push(due);
+	}
+	return out;
+}
+
 export function describeRule(rule: RecurrenceRule): string {
 	const n = Math.max(1, rule.interval);
 	const unit = { daily: "day", weekly: "week", monthly: "month", yearly: "year" }[rule.freq];

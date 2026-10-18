@@ -1,4 +1,4 @@
-import type { RecurrenceRule, StoreData, Task, TaskList } from "../types";
+import type { RecurrenceRule, StoreData, Task, TaskColor, TaskList } from "../types";
 import { nextOccurrence } from "../recurrence/rule";
 import { today } from "../util/dates";
 
@@ -30,6 +30,10 @@ export interface TaskEdit {
 	/** undefined = unchanged, null = clear. */
 	time?: string | null;
 	recurrence?: RecurrenceRule | null;
+	/** undefined = unchanged, null = clear. */
+	color?: TaskColor | null;
+	/** Mode IDs the task may be drawn in. undefined = unchanged, null or empty = every mode. */
+	modes?: string[] | null;
 }
 
 export type ChangeSource = "local" | "remote";
@@ -75,6 +79,15 @@ export class TaskStore {
 
 	time(id: string): string | null {
 		return this.data.times[id] ?? null;
+	}
+
+	color(id: string): TaskColor | null {
+		return this.data.colors[id] ?? null;
+	}
+
+	/** Mode IDs the task may be drawn in, or null for every mode. */
+	modes(id: string): string[] | null {
+		return this.data.taskModes[id] ?? null;
 	}
 
 	rule(id: string): RecurrenceRule | null {
@@ -141,6 +154,16 @@ export class TaskStore {
 			else delete this.data.times[task.id];
 			changed = true;
 		}
+		if (edit.color !== undefined) {
+			if (edit.color) this.data.colors[task.id] = edit.color;
+			else delete this.data.colors[task.id];
+			changed = true;
+		}
+		if (edit.modes !== undefined) {
+			if (edit.modes?.length) this.data.taskModes[task.id] = [...edit.modes];
+			else delete this.data.taskModes[task.id];
+			changed = true;
+		}
 		if (edit.recurrence !== undefined) {
 			if (edit.recurrence) {
 				this.data.recurrence[task.id] = edit.recurrence;
@@ -186,6 +209,8 @@ export class TaskStore {
 		delete this.data.snapshots[id];
 		delete this.data.recurrence[id];
 		delete this.data.times[id];
+		delete this.data.colors[id];
+		delete this.data.taskModes[id];
 		delete this.data.spawned[id];
 	}
 
@@ -207,6 +232,8 @@ export class TaskStore {
 		};
 		moveKey(this.data.recurrence);
 		moveKey(this.data.times);
+		moveKey(this.data.colors);
+		moveKey(this.data.taskModes);
 		moveKey(this.data.spawned);
 		moveKey(this.data.snapshots);
 		for (const [k, v] of Object.entries(this.data.spawned)) if (v === oldId) this.data.spawned[k] = newId;
@@ -236,6 +263,10 @@ export class TaskStore {
 		this.data.recurrence[created.id] = next.rule;
 		const time = this.data.times[task.id];
 		if (time) this.data.times[created.id] = time;
+		const color = this.data.colors[task.id];
+		if (color) this.data.colors[created.id] = color;
+		const modes = this.data.taskModes[task.id];
+		if (modes) this.data.taskModes[created.id] = [...modes];
 		this.data.spawned[task.id] = created.id;
 	}
 

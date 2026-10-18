@@ -84,14 +84,61 @@ export type Grouping = "list" | "date" | "status";
 /** Card order inside board columns. "date" is the completion date for completed tasks, otherwise the due date. */
 export type BoardSort = "default" | "dateAsc" | "dateDesc";
 
+/** What the view shows when gift mode is off. */
+export type BoardView = "board" | "calendar";
+
+export type CalendarRange = "month" | "week";
+
+/** Built-in task colors, drawn with the theme's matching color. */
+export type NamedTaskColor = "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "purple" | "pink";
+
+/** A built-in color name or a custom "#rrggbb" color. */
+export type TaskColor = NamedTaskColor | string;
+
+/** Where task colors are shown. */
+export type TaskColorScope = "both" | "board" | "calendar" | "off";
+
+/** A board column (grouping by due date) for one chosen day. */
+export interface DayColumn {
+	id: string;
+	/** YYYY-MM-DD */
+	date: string;
+	/** Optional name; empty = the date's friendly label. */
+	title: string;
+	/** Removed automatically once its day is over. */
+	autoRemove: boolean;
+}
+
 /** Built-in gift sounds, "random" (one of them each time) or "custom" (an audio file from the vault). */
 export type GiftSound = "birthday" | "chime" | "magic" | "random" | "custom";
 
+/** Sounds, victory and music of a mode's gift view. */
+export interface ModeAudio {
+	giftSoundEnabled: boolean;
+	giftSound: GiftSound;
+	/** Vault path of the audio file used when giftSound is "custom". */
+	giftSoundFile: string;
+	/** 0..100 */
+	giftSoundVolume: number;
+	/** Small celebration when every task of a gift is done. */
+	victoryAnimation: boolean;
+	victorySoundEnabled: boolean;
+	/** Vault path of the audio file played when a gift is finished. */
+	victorySoundFile: string;
+	/** Music looping while the gift view is shown. */
+	giftMusicEnabled: boolean;
+	giftMusicFile: string;
+	/** 0..100 */
+	giftMusicVolume: number;
+	/** Play the sound track of a video background. */
+	giftVideoSound: boolean;
+}
+
 /**
- * A mode (e.g. "Home", "Work") decides which tasks gifts are drawn from and how gift mode looks.
- * Switched from the header of the Task Gift view.
+ * A mode (e.g. "Home", "Work") decides which tasks gifts are drawn from and how gift mode looks and sounds.
+ * Switched from the header of the Task Gift view. The board always shows every task.
  */
-export interface TaskMode {
+export interface TaskMode extends ModeAudio {
 	id: string;
 	name: string;
 	filter: DateFilter;
@@ -105,8 +152,6 @@ export interface TaskMode {
 	backgroundPick: string;
 	/** How much the background is faded towards the theme background, 0..90. */
 	backgroundDim: number;
-	/** The board uses this mode's dates and lists too (otherwise it shows every task). */
-	applyToBoard: boolean;
 }
 
 export interface TaskGiftSettings {
@@ -118,34 +163,31 @@ export interface TaskGiftSettings {
 	tasksPerGift: number;
 	showGiftCounter: boolean;
 	animations: boolean;
-	giftSoundEnabled: boolean;
-	giftSound: GiftSound;
-	/** Vault path of the audio file used when giftSound is "custom". */
-	giftSoundFile: string;
-	/** 0..100 */
-	giftSoundVolume: number;
 	grouping: Grouping;
-	showCompleted: boolean;
+	/** Board columns folded with their eye button, keyed like columnSort. */
+	collapsedColumns: string[];
 	/** Card order per board column, keyed by column (list ID, "today", "completed", …). Missing = default. */
 	columnSort: Record<string, BoardSort>;
 	weekStart: 0 | 1;
 	/** At least one mode always exists; exactly one is active. */
 	modes: TaskMode[];
 	activeModeId: string;
-	/** Small celebration when every task of a gift is done. */
-	victoryAnimation: boolean;
-	victorySoundEnabled: boolean;
-	/** Vault path of the audio file played when a gift is finished. */
-	victorySoundFile: string;
-	/** Music looping while the gift view is shown. */
-	giftMusicEnabled: boolean;
-	giftMusicFile: string;
-	/** 0..100 */
-	giftMusicVolume: number;
-	/** Play the sound track of a video background. */
-	giftVideoSound: boolean;
 	/** Board zoom in percent. */
 	boardZoom: number;
+	boardView: BoardView;
+	calendarRange: CalendarRange;
+	taskColorScope: TaskColorScope;
+	/** Colors added with "+" in the task window ("#rrggbb"). */
+	customTaskColors: string[];
+	/** Extra day columns of the board grouped by due date. */
+	dayColumns: DayColumn[];
+	/** Automatically add today's tasks to the daily note (once a day). */
+	dailyNoteEnabled: boolean;
+	/** Line written above the tasks, e.g. "## Tasks"; empty = none. */
+	dailyNoteHeading: string;
+	dailyNoteIncludeOverdue: boolean;
+	/** Date the tasks were last added automatically. */
+	dailyNoteInsertedOn: string;
 }
 
 export interface AuthData {
@@ -177,6 +219,10 @@ export interface StoreData {
 	recurrence: Record<string, RecurrenceRule>;
 	/** Local due times (HH:MM), keyed by task ID. */
 	times: Record<string, string>;
+	/** Local task colors, keyed by task ID. */
+	colors: Record<string, TaskColor>;
+	/** Modes a task may be drawn in, keyed by task ID. Missing = every mode. */
+	taskModes: Record<string, string[]>;
 	/** Task IDs that already spawned their next occurrence. */
 	spawned: Record<string, string>;
 	/** Temporary local IDs that were replaced by Google IDs (old -> new). */

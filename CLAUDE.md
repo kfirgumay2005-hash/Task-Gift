@@ -1,0 +1,53 @@
+# Task Gift — notes for Claude
+
+Obsidian plugin (TypeScript, esbuild) that syncs Google Tasks and shows a board, a calendar and a "gift" mode.
+The repo *is* the installed plugin folder inside the user's vault (`.obsidian/plugins/Task Gift`).
+
+## Working here
+
+- Build / check: `npm run build` (tsc + esbuild). It writes `main.js` in place, i.e. straight into the live plugin.
+  There is no test suite; a clean build is the check. Obsidian itself can't be driven from here.
+- The plugin reloads itself when `main.js` / `styles.css` / `manifest.json` change on disk (`checkForUpdate` in
+  `main.ts`), so a build — or a new version arriving through sync — takes effect without toggling the plugin.
+- The user writes in Hebrew; answer in Hebrew. All UI text in the plugin stays English. Original spec: `prompt.md`.
+- To debug sync, read the vault notes directly (path in `data.json` → `dataFilePath`; currently
+  `ארכיון/Tasksgift/`). Notes written by this device have ns-precision mtimes; files written by LiveSync have
+  ms-rounded mtimes — useful to tell who wrote what. Use `PYTHONIOENCODING=utf-8` when printing Hebrew from Python,
+  and put longer Python scripts in a file rather than an inline heredoc (backticks/quotes break the Bash tool).
+
+## Storage and cross-device sync (learned the hard way)
+
+The user syncs the vault with **Self-hosted LiveSync** on two computers. What works:
+
+1. **Data lives in vault notes, not `data.json`.** `data.json` only points to the data note.
+   - `Task Gift Settings.md`: settings only (incl. modes). Changes only when a setting changes.
+   - `Task Gift Data.md`: tasks, sync state, sign-in. Rewritten on every sync. Still carries a copy of the
+     settings for older plugin versions, but that copy is **ignored** when the data note arrives from another device.
+   Keeping fast-changing state and settings in one big note made both devices overwrite each other constantly.
+2. **Don't rely on the vault `modify` event.** LiveSync sometimes writes straight to disk. `checkFiles()` polls
+   mtime+size every 2 s and on window focus; `DataFile.readChanged()` only reads when the stamp changed and never
+   hands out the same contents twice.
+3. **Never write a note back just because it was loaded.** On startup the loaded settings are `adopt()`ed, so a
+   device that hasn't received the newest note yet can't overwrite it with its stale copy. Own writes are
+   recognized via `ownWrites` (several, not just the last — `modify` events can arrive late).
+4. **Settings from another device replace the `plugin.settings` object** (`applyExternal` → `mergeSettings`).
+   Never keep a settings or mode object in a long-lived closure; look modes up by id at the time of the change
+   (`ModesEditor.live`).
+5. **Edit cross-device state in the plugin's own view, not in the Obsidian settings tab.** The settings tab does
+   not redraw when settings change from outside, so synced changes looked "lost" even though they had arrived.
+   The view redraws through `plugin.refreshViews()` on every change. The Modes page (`views/modes.ts`) redraws
+   when the settings object identity changes (another device) and not on its own edits (keeps typing focus);
+   edits that show/hide rows redraw explicitly.
+
+When adding a setting, ask: is it changed often or automatically? If yes, it belongs in the data note's store,
+not in the settings note (otherwise two devices write the settings note at once and one change is lost).
+
+## Other conventions
+
+- Google Tasks API has no recurrence and no due times: repeat rules, times, colors and per-task modes are stored
+  locally in the store, keyed by task ID. Keep `remap` / `forget` / `maybeSpawnNext` in `sync/store.ts` in step
+  when adding another per-task map.
+- Modes only affect gifts; the board always shows every task. Each mode owns its own sounds, victory and music.
+- User-entered text (titles, notes, list and mode names) gets `dir="auto"` so Hebrew mixed with numbers keeps
+  its order.
+- Board columns are folded with their eye button (`settings.collapsedColumns`); there is no "show completed" switch.

@@ -68,16 +68,19 @@ export function matchesDateFilter(task: Task, filter: DateFilter | null, weekSta
 	return rangesFor(filter, weekStart, t).some(([a, b]) => task.due !== null && task.due >= a && task.due <= b);
 }
 
-/** The date filter in effect: the active mode's, or null when the board shows every date. */
-export function filterFor(settings: TaskGiftSettings, view: "board" | "gift"): DateFilter | null {
+/** True when the active mode draws gifts from this list. */
+export function isListIncluded(settings: TaskGiftSettings, listId: string): boolean {
 	const mode = activeMode(settings);
-	return view === "gift" || mode.applyToBoard ? mode.filter : null;
+	return mode.includedLists === null || mode.includedLists.includes(listId);
 }
 
-export function isListIncluded(settings: TaskGiftSettings, listId: string, view: "board" | "gift"): boolean {
-	const mode = activeMode(settings);
-	if (view === "board" && !mode.applyToBoard) return true;
-	return mode.includedLists === null || mode.includedLists.includes(listId);
+/**
+ * True when the task may be drawn in the active mode, given the modes chosen in the task window
+ * (null = every mode). Modes that were deleted since are ignored.
+ */
+export function isInActiveMode(settings: TaskGiftSettings, taskModes: string[] | null): boolean {
+	const chosen = taskModes?.filter((id) => settings.modes.some((m) => m.id === id));
+	return !chosen?.length || chosen.includes(activeMode(settings).id);
 }
 
 /** True when the task's description contains one of the active mode's exclusion words (case-insensitive). */

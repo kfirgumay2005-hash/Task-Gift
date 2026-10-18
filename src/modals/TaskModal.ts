@@ -1,8 +1,9 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
-import type { RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, Task, Weekday } from "../types";
+import { App, Menu, Modal, Notice, setIcon } from "obsidian";
+import type { RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, Task, TaskColor, Weekday } from "../types";
 import type { TaskStore } from "../sync/store";
 import { isLastWeekdayOfMonth, nthOfMonth, ruleFromPreset } from "../recurrence/rule";
-import { addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT } from "../util/dates";
+import { addDays, addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT, weekday } from "../util/dates";
+import { TASK_COLORS, taskColorCss } from "../defaults";
 import { ConfirmModal } from "./ConfirmModal";
 
 type RepeatChoice = "none" | RecurrencePreset;
@@ -10,6 +11,10 @@ type RepeatChoice = "none" | RecurrencePreset;
 export interface TaskModalOptions {
 	task?: Task;
 	defaults?: { listId?: string; due?: string | null };
+	/** Custom colors for the color picker; unset hides the picker (task colors turned off). */
+	colors?: { custom: string[]; save: (custom: string[]) => void };
+	/** The modes, for choosing which of them the task may be drawn in. */
+	modes?: { id: string; name: string }[];
 }
 
 /** Create / edit modal with Google-Calendar-style recurrence. */
@@ -19,6 +24,9 @@ export class TaskModal extends Modal {
 	private listId = "";
 	private due = "";
 	private time = "";
+	private color: TaskColor | null = null;
+	/** Modes the task may be drawn in; empty = every mode. */
+	private modes = new Set<string>();
 	private repeat: RepeatChoice = "none";
 	// Custom recurrence state
 	private interval = 1;
@@ -29,8 +37,11 @@ export class TaskModal extends Modal {
 	private endCount = 10;
 	private endDate = "";
 	private existingRule: RecurrenceRule | null = null;
+	/** Date last picked by hand; choosing weekdays moves the due date to the first matching day from here. */
+	private dateBase = "";
 
 	private repeatSelect!: HTMLSelectElement;
+	private dateInput!: HTMLInputElement;
 	private customEl!: HTMLElement;
 	private timeInput!: HTMLInputElement;
 
@@ -43,12 +54,17 @@ export class TaskModal extends Modal {
 			this.listId = t.listId;
 			this.due = t.due ?? "";
 			this.time = store.time(t.id) ?? "";
+			this.color = store.color(t.id);
+			// Modes deleted since are dropped.
+			const known = new Set((opts.modes ?? []).map((m) => m.id));
+			this.modes = new Set((store.modes(t.id) ?? []).filter((id) => known.has(id)));
 			const rule = store.rule(t.id);
 			if (rule) this.loadRule(rule);
 		} else {
 			this.listId = opts.defaults?.listId ?? store.defaultListId() ?? "";
 			this.due = opts.defaults?.due ?? "";
 		}
+		this.dateBase = this.due;
 	}
 
 	private loadRule(rule: RecurrenceRule): void {
@@ -80,7 +96,7 @@ export class TaskModal extends Modal {
 
 		const form = contentEl.createDiv({ cls: "tg-form" });
 
-		const titleInput = form.createEl("input", { cls: "tg-input tg-title-input", attr: { type: "text", placeholder: "Add a title" } });
+		const titleInput = form.createEl("input", { cls: "tg-input tg-title-input", attr: { type: "text", placeholder: "Add a title", dir: "auto" } });
 		titleInput.value = this.title;
 		titleInput.addEventListener("input", () => (this.title = titleInput.value));
 		titleInput.addEventListener("keydown", (e) => {
@@ -91,7 +107,7 @@ export class TaskModal extends Modal {
 		});
 
 		const notesRow = this.row(form, "align-left", "Notes");
-		const notesInput = notesRow.createEl("textarea", { cls: "tg-input tg-notes-input", attr: { rows: "3", placeholder: "Add details" } });
+		const notesInput = notesRow.createEl("textarea", { cls: "tg-input tg-notes-input", attr: { rows: "3", placeholder: "Add details", dir: "auto" } });
 		notesInput.value = this.notes;
 		notesInput.addEventListener("input", () => (this.notes = notesInput.value));
 
@@ -102,7 +118,7 @@ export class TaskModal extends Modal {
 		listSelect.addEventListener("change", () => (this.listId = listSelect.value));
 
 		const dateRow = this.row(form, "calendar", "Due");
-		const dateInput = dateRow.createEl("input", { cls: "tg-input", attr: { type: "date" } });
+		const dateInput = (this.dateInput = dateRow.createEl("input", { cls: "tg-input", attr: { type: "date" } }));
 		dateInput.value = this.due;
 		this.timeInput = dateRow.createEl("input", { cls: "tg-input", attr: { type: "time" } });
 		this.timeInput.value = this.time;
@@ -114,17 +130,20 @@ export class TaskModal extends Modal {
 			dateInput.value = "";
 			this.timeInput.value = "";
 			this.due = "";
+			this.dateBase = "";
 			this.time = "";
 			this.timeInput.disabled = true;
 			this.refreshRepeatOptions();
 		});
 		dateInput.addEventListener("change", () => {
 			this.due = dateInput.value;
+			this.dateBase = this.due;
 			this.timeInput.disabled = !this.due;
 			if (!this.due) {
 				this.timeInput.value = "";
 				this.time = "";
 			}
+			this.syncWeekdaysToDate();
 			this.refreshRepeatOptions();
 		});
 
@@ -137,6 +156,9 @@ export class TaskModal extends Modal {
 		});
 		this.customEl = form.createDiv({ cls: "tg-custom" });
 		this.refreshRepeatOptions();
+
+		if (this.opts.colors) this.renderColorRow(this.row(form, "palette", "Color"), this.opts.colors);
+		if (this.opts.modes?.length) this.renderModesRow(this.row(form, "layers", "Gift modes"), this.opts.modes);
 
 		const hint = form.createDiv({ cls: "tg-hint" });
 		setIcon(hint.createSpan({ cls: "tg-hint-icon" }), "info");
@@ -161,6 +183,130 @@ export class TaskModal extends Modal {
 		const ic = row.createSpan({ cls: "tg-form-icon", attr: { "aria-label": label } });
 		setIcon(ic, icon);
 		return row.createDiv({ cls: "tg-form-field" });
+	}
+
+	/** Swatches are divs, not buttons: Obsidian's button styles would paint over their color. */
+	private renderColorRow(row: HTMLElement, colors: NonNullable<TaskModalOptions["colors"]>): void {
+		row.empty();
+		const swatches = row.createDiv({ cls: "tg-color-swatches", attr: { role: "radiogroup", "aria-label": "Color" } });
+		const swatch = (label: string, onClick: () => void): HTMLElement => {
+			const el = swatches.createDiv({ cls: "tg-color-swatch", attr: { role: "radio", tabindex: "0", "aria-label": label } });
+			el.addEventListener("click", onClick);
+			el.addEventListener("keydown", (e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				onClick();
+			});
+			return el;
+		};
+		const pick = (value: string | null, label: string): HTMLElement => {
+			const el = swatch(label, () => {
+				this.color = value;
+				this.renderColorRow(row, colors);
+			});
+			el.toggleClass("is-active", value === this.color);
+			el.setAttr("aria-checked", String(value === this.color));
+			if (value) el.style.setProperty("--tg-task-color", taskColorCss(value));
+			else {
+				el.addClass("is-none");
+				setIcon(el, "ban");
+			}
+			return el;
+		};
+
+		pick(null, "No color");
+		for (const [value, label] of Object.entries(TASK_COLORS)) pick(value, label);
+		const custom = [...colors.custom];
+		// A custom color removed from the palette stays on tasks that use it.
+		if (this.color && !(this.color in TASK_COLORS) && !custom.includes(this.color)) custom.push(this.color);
+		for (const hex of custom) {
+			const el = pick(hex, `${hex} (right-click to remove)`);
+			el.addEventListener("contextmenu", (e) => {
+				e.preventDefault();
+				new Menu()
+					.addItem((i) =>
+						i
+							.setTitle("Remove color")
+							.setIcon("trash-2")
+							.onClick(() => {
+								colors.custom = colors.custom.filter((c) => c !== hex);
+								colors.save(colors.custom);
+								this.renderColorRow(row, colors);
+							}),
+					)
+					.showAtMouseEvent(e);
+			});
+		}
+
+		const input = row.createEl("input", { cls: "tg-color-input", attr: { type: "color", tabindex: "-1", "aria-hidden": "true" } });
+		const plus = swatch("Add a color", () => input.click());
+		plus.addClass("is-add");
+		setIcon(plus, "plus");
+		input.addEventListener("change", () => {
+			const hex = input.value.toLowerCase();
+			if (!colors.custom.includes(hex)) {
+				colors.custom = [...colors.custom, hex];
+				colors.save(colors.custom);
+			}
+			this.color = hex;
+			this.renderColorRow(row, colors);
+		});
+	}
+
+	/** Chips choosing the modes whose gifts may draw this task: "All modes", or any number of single modes. */
+	private renderModesRow(row: HTMLElement, modes: NonNullable<TaskModalOptions["modes"]>): void {
+		row.empty();
+		row.addClass("tg-modes-field");
+		const chips = row.createDiv({ cls: "tg-filter-chips tg-task-modes", attr: { role: "group", "aria-label": "Drawn in modes" } });
+		const chip = (label: string, active: boolean, onClick: () => void) => {
+			const el = chips.createEl("button", { cls: "tg-chip tg-chip-wide", text: label, attr: { "aria-pressed": String(active), dir: "auto" } });
+			el.toggleClass("is-active", active);
+			el.addEventListener("click", (e) => {
+				e.preventDefault();
+				onClick();
+				this.renderModesRow(row, modes);
+			});
+		};
+		chip("All modes", this.modes.size === 0, () => this.modes.clear());
+		for (const m of modes) {
+			chip(m.name, this.modes.has(m.id), () => {
+				if (this.modes.has(m.id)) this.modes.delete(m.id);
+				else this.modes.add(m.id);
+				// Every mode picked one by one is the same as "All modes".
+				if (this.modes.size === modes.length) this.modes.clear();
+			});
+		}
+		row.createDiv({
+			cls: "tg-subhint",
+			text: this.modes.size === 0 ? "Gifts in every mode can draw this task." : "Only gifts in the selected modes can draw this task.",
+		});
+	}
+
+	/** Makes the weekday circles include the due date's weekday (replacing a single selected day). */
+	private syncWeekdaysToDate(): void {
+		if (!this.due) return;
+		const wd = weekday(this.due) as Weekday;
+		if (this.weekdays.has(wd)) return;
+		if (this.weekdays.size <= 1) this.weekdays.clear();
+		this.weekdays.add(wd);
+	}
+
+	/** Moves the due date to the first selected weekday on or after the date picked by hand (or today). */
+	private moveDueToWeekdays(): void {
+		if (!this.weekdays.size) return;
+		const base = this.dateBase || today();
+		for (let i = 0; i < 7; i++) {
+			const cand = addDays(base, i);
+			if (!this.weekdays.has(weekday(cand) as Weekday)) continue;
+			if (cand !== this.due) {
+				this.due = cand;
+				this.dateInput.value = cand;
+				this.timeInput.disabled = false;
+				// Rebuilds the repeat labels ("Weekly on …") and the custom section.
+				this.refreshRepeatOptions();
+			}
+			return;
+		}
 	}
 
 	private refreshRepeatOptions(): void {
@@ -203,6 +349,7 @@ export class TaskModal extends Modal {
 		unit.value = this.freq;
 		unit.addEventListener("change", () => {
 			this.freq = unit.value as RecurrenceFreq;
+			if (this.freq === "weekly" && this.weekdays.size === 0) this.weekdays.add(weekday(this.refDate()) as Weekday);
 			this.renderCustom();
 		});
 
@@ -220,6 +367,7 @@ export class TaskModal extends Modal {
 						if (this.weekdays.size > 1) this.weekdays.delete(wd);
 					} else this.weekdays.add(wd);
 					chip.toggleClass("is-active", this.weekdays.has(wd));
+					this.moveDueToWeekdays();
 				});
 			}
 		}
@@ -317,11 +465,13 @@ export class TaskModal extends Modal {
 		const rule = due ? this.buildRule(due) : null;
 		const time = due && this.time ? this.time : null;
 		const task = this.opts.task;
+		const color = this.opts.colors ? this.color : undefined;
+		const modes = this.opts.modes?.length ? [...this.modes] : undefined;
 		if (task) {
-			this.store.update(task.id, { title, notes: this.notes, due, listId: this.listId, time, recurrence: rule });
+			this.store.update(task.id, { title, notes: this.notes, due, listId: this.listId, time, recurrence: rule, color, modes });
 		} else {
 			const created = this.store.create({ title, notes: this.notes, listId: this.listId, due }, "local", true);
-			this.store.update(created.id, { time, recurrence: rule });
+			this.store.update(created.id, { time, recurrence: rule, color, modes });
 			this.store.notify("local");
 		}
 		this.close();

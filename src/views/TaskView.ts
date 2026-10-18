@@ -6,8 +6,14 @@ import { activeMode } from "../modes";
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from "../defaults";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
+import { today } from "../util/dates";
 import { BoardUiState, renderBoard } from "./board";
+import { CalendarUiState, renderCalendar } from "./calendar";
 import { GiftController } from "./gift";
+import { ModesEditor } from "./modes";
+import { renderSearchResults } from "./search";
+
+type ViewMode = "board" | "calendar" | "gift" | "modes";
 
 const GROUPING_LABELS: Record<Grouping, string> = { list: "By list", date: "By due date", status: "By status" };
 
@@ -15,15 +21,39 @@ export class TaskView extends ItemView {
 	private headerEl!: HTMLElement;
 	/** Per-column search state; survives re-renders while the view is open. */
 	private boardUi: BoardUiState = { queries: new Map(), searchOpen: new Set(), zoomDelta: 0 };
+	private calendarUi: CalendarUiState = { anchor: today() };
+	/** Header search over all tasks; while it has text, the body shows its results. */
+	private search = { open: false, query: "" };
 	private bodyEl!: HTMLElement;
 	private syncBtn!: HTMLElement;
 	private gift: GiftController;
+	private modesEditor: ModesEditor;
+	/** The Modes page is open (view-local, not saved). */
+	private showingModes = false;
 	private unsubscribe: (() => void) | null = null;
-	private renderedMode: "board" | "gift" | null = null;
+	private renderedMode: ViewMode | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: TaskGiftPlugin) {
 		super(leaf);
 		this.gift = new GiftController(plugin);
+		this.modesEditor = new ModesEditor(plugin);
+	}
+
+	/** True when gift mode is on screen here (not the Modes page). */
+	showsGift(): boolean {
+		return this.plugin.settings.giftMode && !this.showingModes && this.containerEl.isShown();
+	}
+
+	/** Opens the Modes page. */
+	showModes(): void {
+		this.showingModes = true;
+		this.gift.setOnScreen(false);
+		this.refresh();
+		this.plugin.updateMusic();
+	}
+
+	private closeModes(): void {
+		this.showingModes = false;
 	}
 
 	getViewType(): string {
@@ -46,7 +76,7 @@ export class TaskView extends ItemView {
 		this.bodyEl = root.createDiv({ cls: "tg-body" });
 		this.unsubscribe = this.plugin.onStatus((s) => this.updateSyncButton(s));
 		// Pause a video background (and its sound) while this tab is hidden.
-		const syncMedia = () => this.gift.setOnScreen(this.plugin.settings.giftMode && this.containerEl.isShown());
+		const syncMedia = () => this.gift.setOnScreen(this.showsGift());
 		this.registerEvent(this.app.workspace.on("active-leaf-change", syncMedia));
 		this.registerEvent(this.app.workspace.on("layout-change", syncMedia));
 		this.refresh();
@@ -61,16 +91,50 @@ export class TaskView extends ItemView {
 
 	refresh(): void {
 		if (!this.bodyEl) return;
-		const mode = this.plugin.settings.giftMode ? "gift" : "board";
+		const s = this.plugin.settings;
+		const mode: ViewMode = this.showingModes ? "modes" : s.giftMode ? "gift" : s.boardView;
+		// A sync can re-render the header while someone is typing in the search box: keep focus and caret.
+		const active = activeDocument.activeElement;
+		const typing = active instanceof HTMLInputElement && active.hasClass("tg-global-search-input");
+		const caret = typing ? [active.selectionStart, active.selectionEnd] : null;
+
 		this.renderHeader(mode);
 		this.contentEl.toggleClass("is-gift-mode", mode === "gift");
-		if (mode === "gift") {
+		this.contentEl.toggleClass("is-calendar-mode", mode === "calendar");
+		this.contentEl.toggleClass("is-modes-mode", mode === "modes");
+		if (mode === "modes") {
+			// Redraws only when the settings were replaced (e.g. changed on another device), so typing keeps focus.
+			this.modesEditor.render(this.bodyEl, this.renderedMode !== "modes");
+		} else if (mode === "gift") {
 			if (this.renderedMode !== "gift") this.bodyEl.empty();
 			this.gift.render(this.bodyEl);
 		} else {
-			this.renderBoardBody();
+			this.renderMainBody(mode);
 		}
 		this.renderedMode = mode;
+
+		if (typing) {
+			const input = this.headerEl.querySelector<HTMLInputElement>(".tg-global-search-input");
+			if (input) {
+				input.focus();
+				if (caret) input.setSelectionRange(caret[0], caret[1]);
+			}
+		}
+	}
+
+	private renderMainBody(mode: "board" | "calendar"): void {
+		if (this.search.query.trim()) {
+			const scroll = this.bodyEl.querySelector(".tg-search-results")?.scrollTop ?? 0;
+			this.bodyEl.empty();
+			renderSearchResults(this.bodyEl, this.plugin, this.search.query);
+			const results = this.bodyEl.querySelector(".tg-search-results");
+			if (results) results.scrollTop = scroll;
+		} else if (mode === "calendar") {
+			this.bodyEl.empty();
+			renderCalendar(this.bodyEl, this.plugin, this.calendarUi, () => this.renderMainBody("calendar"));
+		} else {
+			this.renderBoardBody();
+		}
 	}
 
 	private renderBoardBody(): void {
@@ -106,33 +170,41 @@ export class TaskView extends ItemView {
 	}
 
 
-	private renderHeader(mode: "board" | "gift"): void {
+	private renderHeader(mode: ViewMode): void {
 		const p = this.plugin;
 		const h = this.headerEl;
 		h.empty();
 
 		const left = h.createDiv({ cls: "tg-header-left" });
 		const toggle = left.createDiv({ cls: "tg-mode-toggle", attr: { role: "tablist" } });
-		const mk = (m: "board" | "gift", icon: string, label: string) => {
-			const b = toggle.createEl("button", { cls: "tg-mode-btn", attr: { role: "tab", "aria-selected": String(mode === m) } });
+		const mk = (m: ViewMode, icon: string, label: string) => {
+			const b = toggle.createEl("button", { cls: "tg-mode-btn", attr: { role: "tab", "aria-selected": String(mode === m), "aria-label": label } });
 			b.toggleClass("is-active", mode === m);
 			setIcon(b.createSpan(), icon);
-			b.createSpan({ text: label });
-			b.addEventListener("click", () => void p.setGiftMode(m === "gift"));
+			b.createSpan({ cls: "tg-mode-btn-label", text: label });
+			b.addEventListener("click", () => {
+				if (m === "modes") {
+					this.showModes();
+					return;
+				}
+				this.closeModes();
+				void (m === "gift" ? p.setGiftMode(true) : p.setBoardView(m));
+			});
 		};
 		mk("board", "layout-dashboard", "Board");
+		mk("calendar", "calendar-days", "Calendar");
 		mk("gift", "gift", "Gift");
+		mk("modes", "layers", "Modes");
 
 		const current = activeMode(p.settings);
-		const boardFiltered = mode === "gift" || current.applyToBoard;
 		const modeChip = left.createEl("button", {
 			cls: "tg-filter-chip tg-mode-chip",
-			attr: { "aria-label": `Mode: ${current.name} · ${describeFilter(current.filter)}${boardFiltered ? "" : " (gifts only)"}
+			attr: { "aria-label": `Mode: ${current.name} · ${describeFilter(current.filter)} (gifts)
 Click to switch` },
 		});
 		setIcon(modeChip.createSpan(), "layers");
 		modeChip.createSpan({ cls: "tg-mode-chip-name", text: current.name });
-		if (boardFiltered) modeChip.createSpan({ cls: "tg-mode-chip-filter", text: describeFilter(current.filter) });
+		if (mode === "gift") modeChip.createSpan({ cls: "tg-mode-chip-filter", text: describeFilter(current.filter) });
 		setIcon(modeChip.createSpan({ cls: "tg-mode-chip-caret" }), "chevron-down");
 		modeChip.addEventListener("click", (e) => {
 			const menu = new Menu();
@@ -145,11 +217,12 @@ Click to switch` },
 				);
 			}
 			menu.addSeparator();
-			menu.addItem((i) => i.setTitle("Edit modes…").setIcon("settings").onClick(() => this.openSettings()));
+			menu.addItem((i) => i.setTitle("Edit modes…").setIcon("pencil").onClick(() => this.showModes()));
 			menu.showAtMouseEvent(e);
 		});
 
 		const right = h.createDiv({ cls: "tg-header-right" });
+		if (mode === "board" || mode === "calendar") this.renderSearch(right, mode);
 		if (mode === "board") {
 			const group = right.createEl("button", { cls: "tg-header-btn", attr: { "aria-label": "Group columns" } });
 			setIcon(group.createSpan(), "columns-3");
@@ -167,16 +240,6 @@ Click to switch` },
 							}),
 					);
 				}
-				menu.addSeparator();
-				menu.addItem((i) =>
-					i
-						.setTitle("Show completed")
-						.setChecked(p.settings.showCompleted)
-						.onClick(() => {
-							p.settings.showCompleted = !p.settings.showCompleted;
-							void p.saveSettings();
-						}),
-				);
 				menu.showAtMouseEvent(e);
 			});
 
@@ -191,19 +254,7 @@ Click to switch` },
 			setIcon(zoomIn, "zoom-in");
 			zoomIn.disabled = p.settings.boardZoom >= BOARD_ZOOM_MAX;
 			zoomIn.addEventListener("click", () => void this.setZoom(p.settings.boardZoom + BOARD_ZOOM_STEP));
-
-			const completed = right.createEl("button", {
-				cls: "clickable-icon tg-icon-btn",
-				attr: { "aria-label": p.settings.showCompleted ? "Hide completed" : "Show completed" },
-			});
-			completed.toggleClass("is-active", p.settings.showCompleted);
-			setIcon(completed, p.settings.showCompleted ? "eye" : "eye-off");
-			completed.addEventListener("click", () => {
-				p.settings.showCompleted = !p.settings.showCompleted;
-				void p.saveSettings();
-			});
 		}
-
 		const add = right.createEl("button", { cls: "clickable-icon tg-icon-btn", attr: { "aria-label": "New task" } });
 		setIcon(add, "plus");
 		add.addEventListener("click", () => p.openTaskModal());
@@ -219,8 +270,44 @@ Click to switch` },
 		more.addEventListener("click", (e) => {
 			const menu = new Menu();
 			menu.addItem((i) => i.setTitle("Full resync").setIcon("refresh-ccw").onClick(() => void p.syncNow(true)));
+			menu.addItem((i) => i.setTitle("Insert today's tasks into daily note").setIcon("calendar-check").onClick(() => void p.insertIntoDailyNote()));
 			menu.addItem((i) => i.setTitle("Settings").setIcon("settings").onClick(() => this.openSettings()));
 			menu.showAtMouseEvent(e);
+		});
+	}
+
+	/** Search box over all tasks (every list, date and status). */
+	private renderSearch(parent: HTMLElement, mode: "board" | "calendar"): void {
+		const wrap = parent.createDiv({ cls: "tg-global-search" });
+		const btn = wrap.createEl("button", { cls: "clickable-icon tg-icon-btn", attr: { "aria-label": "Search all tasks" } });
+		setIcon(btn, "search");
+		btn.toggleClass("is-active", this.search.open);
+		const close = () => {
+			this.search = { open: false, query: "" };
+			this.refresh();
+		};
+		btn.addEventListener("click", () => {
+			if (this.search.open) close();
+			else {
+				this.search.open = true;
+				this.refresh();
+				this.headerEl.querySelector<HTMLInputElement>(".tg-global-search-input")?.focus();
+			}
+		});
+		if (!this.search.open) return;
+		const input = wrap.createEl("input", {
+			cls: "tg-global-search-input",
+			attr: { type: "search", placeholder: "Search all tasks…", "aria-label": "Search all tasks" },
+		});
+		input.value = this.search.query;
+		input.addEventListener("input", () => {
+			this.search.query = input.value;
+			this.renderMainBody(mode);
+		});
+		input.addEventListener("keydown", (e) => {
+			if (e.key !== "Escape") return;
+			e.preventDefault();
+			close();
 		});
 	}
 

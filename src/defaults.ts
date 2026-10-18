@@ -1,4 +1,4 @@
-import type { DateFilter, GiftState, StoreData, TaskGiftSettings } from "./types";
+import type { DateFilter, GiftState, ModeAudio, NamedTaskColor, StoreData, TaskColor, TaskGiftSettings } from "./types";
 
 export const VIEW_TYPE = "task-gift-view";
 
@@ -10,10 +10,41 @@ export const DEFAULT_MODE_FILTER: DateFilter = {
 	includeNoDate: true,
 };
 
+export const DEFAULT_MODE_AUDIO: ModeAudio = {
+	giftSoundEnabled: true,
+	giftSound: "birthday",
+	giftSoundFile: "",
+	giftSoundVolume: 70,
+	victoryAnimation: true,
+	victorySoundEnabled: false,
+	victorySoundFile: "",
+	giftMusicEnabled: false,
+	giftMusicFile: "",
+	giftMusicVolume: 40,
+	giftVideoSound: false,
+};
+
 /** Board zoom steps in percent. */
 export const BOARD_ZOOM_MIN = 50;
 export const BOARD_ZOOM_MAX = 150;
 export const BOARD_ZOOM_STEP = 10;
+
+/** Task colors in picker order, with their names. */
+export const TASK_COLORS: Record<NamedTaskColor, string> = {
+	red: "Red",
+	orange: "Orange",
+	yellow: "Yellow",
+	green: "Green",
+	cyan: "Cyan",
+	blue: "Blue",
+	purple: "Purple",
+	pink: "Pink",
+};
+
+/** CSS value for a task color: the theme's color for built-in names, otherwise the custom color itself. */
+export function taskColorCss(color: TaskColor): string {
+	return color in TASK_COLORS ? `var(--color-${color})` : color;
+}
 
 /** "Keep completed tasks" value meaning no time limit. */
 export const KEEP_FOREVER = -1;
@@ -30,25 +61,23 @@ export const DEFAULT_SETTINGS: TaskGiftSettings = {
 	tasksPerGift: 1,
 	showGiftCounter: true,
 	animations: true,
-	giftSoundEnabled: true,
-	giftSound: "birthday",
-	giftSoundFile: "",
-	giftSoundVolume: 70,
 	grouping: "list",
-	showCompleted: false,
+	collapsedColumns: ["completed"],
 	columnSort: {},
 	weekStart: 0,
 	// Filled with one default mode on load.
 	modes: [],
 	activeModeId: "",
-	victoryAnimation: true,
-	victorySoundEnabled: false,
-	victorySoundFile: "",
-	giftMusicEnabled: false,
-	giftMusicFile: "",
-	giftMusicVolume: 40,
-	giftVideoSound: false,
 	boardZoom: 100,
+	boardView: "board",
+	calendarRange: "month",
+	taskColorScope: "both",
+	customTaskColors: [],
+	dayColumns: [],
+	dailyNoteEnabled: false,
+	dailyNoteHeading: "## Tasks",
+	dailyNoteIncludeOverdue: true,
+	dailyNoteInsertedOn: "",
 };
 
 export function emptyGiftState(): GiftState {
@@ -62,6 +91,8 @@ export function emptyStore(): StoreData {
 		snapshots: {},
 		recurrence: {},
 		times: {},
+		colors: {},
+		taskModes: {},
 		spawned: {},
 		aliases: {},
 		lastSyncAt: null,

@@ -4,6 +4,7 @@ import type TaskGiftPlugin from "../main";
 import type { Task } from "../types";
 import { describeRule } from "../recurrence/rule";
 import { addDays, friendlyDate, today } from "../util/dates";
+import { taskColorCss } from "../defaults";
 
 export interface CardOptions {
 	showList: boolean;
@@ -13,6 +14,18 @@ export interface CardOptions {
 	notesLines?: number;
 	/** Show the actions menu (⋯ button, right-click, long-press). Default true. */
 	menu?: boolean;
+	/** Which view the card is in, for the "Show task colors" setting. Unset = never colored. */
+	colorIn?: "board" | "calendar";
+}
+
+/** Tints an element with the task's color when the settings show colors in this view. */
+export function applyTaskColor(el: HTMLElement, plugin: TaskGiftPlugin, task: Task, where: "board" | "calendar"): void {
+	const scope = plugin.settings.taskColorScope;
+	if (scope !== "both" && scope !== where) return;
+	const color = plugin.store.color(task.id);
+	if (!color) return;
+	el.addClass("has-color");
+	el.style.setProperty("--tg-task-color", taskColorCss(color));
 }
 
 /** Touch-friendly alternative to drag & drop: complete, reschedule, move list, delete. */
@@ -89,6 +102,7 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	card.dataset.taskId = task.id;
 	card.toggleClass("is-done", done);
 	if (task.parent) card.addClass("is-subtask");
+	if (opts.colorIn) applyTaskColor(card, plugin, task, opts.colorIn);
 
 	if (opts.checkbox) {
 		const cb = card.createEl("button", {
@@ -104,19 +118,20 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	}
 
 	const body = card.createDiv({ cls: "tg-card-body" });
-	body.createDiv({ cls: "tg-card-title", text: task.title || "(untitled)" });
+	// dir="auto": a Hebrew / Arabic title starting with a number ("50 מילים") keeps its word order.
+	body.createDiv({ cls: "tg-card-title", text: task.title || "(untitled)", attr: { dir: "auto" } });
 
 	if (task.parent) {
 		const parentTask = store.get(task.parent);
 		if (parentTask) {
 			const sub = body.createDiv({ cls: "tg-card-parent" });
 			setIcon(sub.createSpan({ cls: "tg-meta-icon" }), "corner-down-right");
-			sub.createSpan({ text: parentTask.title });
+			sub.createSpan({ text: parentTask.title, attr: { dir: "auto" } });
 		}
 	}
 
 	if (task.notes) {
-		const notes = body.createDiv({ cls: "tg-card-notes", text: task.notes });
+		const notes = body.createDiv({ cls: "tg-card-notes", text: task.notes, attr: { dir: "auto" } });
 		notes.style.setProperty("--tg-lines", String(opts.notesLines ?? 2));
 	}
 
@@ -144,7 +159,7 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	if (opts.showList) {
 		const chip = meta.createSpan({ cls: "tg-meta tg-meta-list" });
 		setIcon(chip.createSpan({ cls: "tg-meta-icon" }), "list");
-		chip.createSpan({ text: store.listTitle(task.listId) });
+		chip.createSpan({ text: store.listTitle(task.listId), attr: { dir: "auto" } });
 	}
 	if (task.dirty) {
 		const chip = meta.createSpan({ cls: "tg-meta tg-meta-pending", attr: { "aria-label": "Waiting to sync" } });

@@ -1,7 +1,7 @@
 import { Notice, setIcon, TFile } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import type { Task } from "../types";
-import { filterFor, isExcludedFromGift, isListIncluded, matchesDateFilter } from "../filters/dates";
+import { isExcludedFromGift, isInActiveMode, isListIncluded, matchesDateFilter } from "../filters/dates";
 import { today } from "../util/dates";
 import { playGiftSound, playVictorySound } from "../audio/sounds";
 import { activeMode } from "../modes";
@@ -57,15 +57,17 @@ export class GiftController {
 	/** Tasks that may be drawn. */
 	candidates(): Task[] {
 		const s = this.plugin.settings;
-		const filter = filterFor(s, "gift");
-		return this.plugin.store
+		const store = this.plugin.store;
+		const filter = activeMode(s).filter;
+		return store
 			.all()
 			.filter(
 				(t) =>
 					t.status !== "completed" &&
-					isListIncluded(s, t.listId, "gift") &&
+					isListIncluded(s, t.listId) &&
 					matchesDateFilter(t, filter, s.weekStart) &&
-					!isExcludedFromGift(s, t),
+					!isExcludedFromGift(s, t) &&
+					isInActiveMode(s, store.modes(t.id)),
 			);
 	}
 
@@ -210,7 +212,7 @@ export class GiftController {
 	private playVideo(): void {
 		const video = this.video;
 		if (!video) return;
-		video.muted = !this.plugin.settings.giftVideoSound;
+		video.muted = !activeMode(this.plugin.settings).giftVideoSound;
 		// Moving the element out of the document pauses it; resume where it was.
 		void video.play().catch(() => {
 			if (video.muted) return; // autoplay blocked: the first frame stays as a still background
@@ -237,7 +239,7 @@ export class GiftController {
 	/** Quick toggles in the corner of the stage: music and the video's sound. */
 	private renderControls(stage: HTMLElement): void {
 		const p = this.plugin;
-		const s = p.settings;
+		const s = activeMode(p.settings);
 		const bar = stage.createDiv({ cls: "tg-gift-controls" });
 		if (s.giftMusicFile) {
 			const on = s.giftMusicEnabled;
@@ -385,7 +387,7 @@ export class GiftController {
 				stage.removeClass("is-charging");
 				box.removeClass("is-shaking");
 				box.addClass("is-opening");
-				playGiftSound(this.plugin.app, this.plugin.settings);
+				playGiftSound(this.plugin.app, activeMode(this.plugin.settings));
 				this.flash(stage);
 				this.confetti(stage, box, 80);
 				this.floaters(stage, box);
@@ -394,7 +396,7 @@ export class GiftController {
 				wrap.addClass("is-leaving");
 				await wait(320);
 			} else {
-				playGiftSound(this.plugin.app, this.plugin.settings);
+				playGiftSound(this.plugin.app, activeMode(this.plugin.settings));
 				if (motion === "fade") {
 					wrap.addClass("is-fading");
 					await wait(300);
@@ -470,7 +472,7 @@ export class GiftController {
 
 	/** Small celebration when the whole gift is done: a trophy pops up and confetti rains down. */
 	private victory(stage: HTMLElement): void {
-		const s = this.plugin.settings;
+		const s = activeMode(this.plugin.settings);
 		playVictorySound(this.plugin.app, s);
 		if (!s.victoryAnimation) return;
 		const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

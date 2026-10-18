@@ -1,5 +1,5 @@
 import { App, TFile } from "obsidian";
-import type { TaskGiftSettings } from "../types";
+import type { ModeAudio } from "../types";
 
 /** Background music that loops while the gift view is on screen. One player for the whole plugin. */
 export class GiftMusic {
@@ -7,8 +7,8 @@ export class GiftMusic {
 
 	constructor(private readonly app: App) {}
 
-	/** Starts, adjusts or stops the music. `onScreen` = a Task Gift view is showing gift mode. */
-	update(s: TaskGiftSettings, onScreen: boolean): void {
+	/** Starts, adjusts or stops the active mode's music. `onScreen` = a Task Gift view is showing gift mode. */
+	update(s: ModeAudio, onScreen: boolean): void {
 		const file = s.giftMusicEnabled && s.giftMusicFile ? this.app.vault.getAbstractFileByPath(s.giftMusicFile) : null;
 		if (!onScreen || !(file instanceof TFile)) {
 			this.audio?.pause();
