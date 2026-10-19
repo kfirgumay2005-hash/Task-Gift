@@ -1,3 +1,4 @@
+import { indentWidth } from "./notes";
 import { daysInMonth, isDateString, parseDate, today, toDateString } from "../util/dates";
 
 /** One entry of an extra calendar (e.g. a shift). Lives only in the calendar's note, never in Google Tasks. */
@@ -112,8 +113,18 @@ export function parseEntries(text: string): ParseResult {
 	const entries: CalendarEntry[] = [];
 	const skipped: string[] = [];
 	let cur: CalendarEntry | null = null;
+	/** Indent of the current entry's line; lines indented deeper below it are its description. */
+	let curIndent = 0;
+	/** Indent of the current entry's first description line, taken off all of them (nested lists keep the rest). */
+	let notesIndent = -1;
 	/** A blank line was seen since the current entry's last line. */
 	let gap = false;
+
+	const addNote = (entry: CalendarEntry, textLine: string) => {
+		// A blank line inside a description is kept (one at most).
+		entry.notes = entry.notes ? `${entry.notes}${gap ? "\n\n" : "\n"}${textLine}` : textLine;
+		gap = false;
+	};
 
 	for (const raw of text.split(/\r?\n/)) {
 		const line = raw.replace(/\s+$/, "");
@@ -122,11 +133,17 @@ export function parseEntries(text: string): ParseResult {
 			gap = true;
 			continue;
 		}
+		const width = indentWidth(line);
+		// Indented deeper than its entry: description, even a heading, a code fence or a checkbox with a date.
+		if (cur && width >= curIndent + 2) {
+			if (notesIndent < 0) notesIndent = width;
+			addNote(cur, dedent(line, Math.min(notesIndent, width)));
+			continue;
+		}
 		if (/^(```|~~~|#|%%|---$)/.test(trimmed)) {
 			cur = null;
 			continue;
 		}
-		const indented = /^(\s{2,}|\t)/.test(line);
 		const quoted = trimmed.startsWith(">");
 		// A line starting with a date is a new entry even when indented (pasted lists are often indented as a whole).
 		const entry = quoted ? null : parseEntryLine(line);
@@ -135,18 +152,18 @@ export function parseEntries(text: string): ParseResult {
 			if (cur && !cur.notes && !entry.notes && sameSlot(cur, entry)) continue;
 			entries.push(entry);
 			cur = entry;
+			curIndent = width;
+			notesIndent = -1;
 			gap = false;
 			continue;
 		}
-		if (cur && (indented || quoted)) {
-			const textLine = trimmed.replace(/^>\s?/, "");
-			cur.notes = cur.notes ? `${cur.notes}\n${textLine}` : textLine;
-			gap = false;
+		if (cur && quoted) {
+			addNote(cur, trimmed.replace(/^>\s?/, ""));
 			continue;
 		}
 		// Plain text right below an entry (no blank line between) also belongs to its description.
 		if (cur && !gap) {
-			cur.notes = cur.notes ? `${cur.notes}\n${trimmed}` : trimmed;
+			addNote(cur, trimmed);
 			continue;
 		}
 		cur = null;
@@ -179,12 +196,24 @@ export function timeLabel(e: CalendarEntry): string {
 export function formatEntry(e: CalendarEntry): string {
 	const time = e.start ? ` ${e.end ? `${e.start}-${e.end}` : e.start}` : "";
 	const head = `- [${e.done ? "x" : " "}] ${e.date}${time} ${e.title.replace(/\s*\n\s*/g, " ").trim()}`;
+	// Description lines keep their own indent (nested lists) under the entry's; one blank line at most between.
 	const notes = e.notes
-		.split(/\r?\n/)
-		.map((l) => l.trim())
-		.filter((l) => l)
-		.map((l) => `    ${l}`);
-	return [head, ...notes].join("\n");
+		.replace(/[ \t]+$/gm, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.replace(/^\n+|\n+$/g, "");
+	if (!notes) return head;
+	return [head, ...notes.split("\n").map((l) => (l ? `    ${l}` : ""))].join("\n");
+}
+
+/** The line with `width` columns of indentation taken off (a tab counting as 4). */
+function dedent(line: string, width: number): string {
+	let i = 0;
+	let w = 0;
+	while (i < line.length && w < width && (line[i] === " " || line[i] === "\t")) {
+		w += line[i] === "\t" ? 4 : 1;
+		i++;
+	}
+	return line.slice(i);
 }
 
 function sameSlot(a: CalendarEntry, b: CalendarEntry): boolean {

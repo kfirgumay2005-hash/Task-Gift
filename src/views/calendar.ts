@@ -1,6 +1,7 @@
 import { Menu, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import { CalendarEntry, timeLabel } from "../calendars/format";
+import { checklistCount, renderNotes, toggleCheck } from "../calendars/notes";
 import type { ExtraCalendar } from "../calendars/store";
 import { taskColorCss } from "../defaults";
 import { CalendarEditModal, CalendarEntryModal, CalendarImportModal } from "../modals/CalendarModals";
@@ -250,7 +251,17 @@ function renderEntry(parent: HTMLElement, plugin: TaskGiftPlugin, cal: ExtraCale
 	});
 	if (time) el.createSpan({ cls: "tg-cal-item-time", text: time });
 	el.createSpan({ cls: "tg-cal-item-title", text: e.title, attr: { dir: "auto" } });
-	if (week && e.notes) el.createDiv({ cls: "tg-cal-entry-notes", text: e.notes, attr: { dir: "auto" } });
+	const checks = checklistCount(e.notes);
+	if (checks.total) {
+		const badge = el.createSpan({ cls: "tg-cal-entry-progress", text: `${checks.done}/${checks.total}` });
+		badge.toggleClass("is-complete", checks.done === checks.total);
+	}
+	if (week && e.notes) {
+		renderNotes(el.createDiv({ cls: "tg-cal-entry-notes" }), e.notes, (line) => {
+			e.notes = toggleCheck(e.notes, line);
+			void plugin.calendars.save(cal);
+		});
+	}
 	el.addEventListener("click", () => new CalendarEntryModal(plugin.app, plugin.calendars, cal, e, e.date).open());
 }
 

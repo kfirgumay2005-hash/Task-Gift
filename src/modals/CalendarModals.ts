@@ -4,7 +4,9 @@ import { CalendarEntry, isValidEntry, mergeEntries, parseEntries, timeLabel } fr
 import type { CalendarStore, ExtraCalendar } from "../calendars/store";
 import type { NamedTaskColor, TaskColor } from "../types";
 import { isDateString, shortDate } from "../util/dates";
+import { renderNotes } from "../calendars/notes";
 import { ConfirmModal } from "./ConfirmModal";
+import { attachNotesToolbar } from "./NotesEditor";
 
 /** Color swatches (no color + the built-in colors) for a calendar. */
 function renderSwatches(parent: HTMLElement, current: () => TaskColor | null, onPick: (c: TaskColor | null) => void): void {
@@ -146,9 +148,9 @@ export class CalendarImportModal extends Modal {
 		const { contentEl } = this;
 
 		const help = contentEl.createDiv({ cls: "tg-import-help" });
-		help.createEl("p", { text: "One entry per line: a date, optionally a time or time range, then the title. Indented lines below an entry are its description." });
+		help.createEl("p", { text: "One entry per line: a date, optionally a time or time range, then the title. Indented lines below an entry are its description; \"- [ ] \" lines there become checkboxes." });
 		help.createEl("pre", {
-			text: "2026-03-02 09:00-11:30 Dentist\n    Bring the referral\n03/03 14:00 Team meeting\n2026-03-06 Trip to the north | pack the night before",
+			text: "2026-03-02 09:00-11:30 Dentist\n    Bring the referral\n03/03 07:00-15:00 Morning shift\n    - [ ] Keys\n    - [ ] Water bottle\n2026-03-06 Trip to the north | pack the night before",
 			attr: { dir: "ltr" },
 		});
 		help.createEl("p", { text: "Dates: 2026-10-18, 18/10/2026 or 18/10 (day first). Bullets, checkboxes, weekday names and other text around the list are ignored." });
@@ -217,7 +219,7 @@ export class CalendarImportModal extends Modal {
 			row.createSpan({ cls: "tg-import-time", text: timeLabel(e) });
 			const main = row.createDiv({ cls: "tg-import-main" });
 			main.createDiv({ text: e.title, attr: { dir: "auto" } });
-			if (e.notes) main.createDiv({ cls: "tg-import-notes", text: e.notes, attr: { dir: "auto" } });
+			if (e.notes) renderNotes(main.createDiv({ cls: "tg-import-notes" }), e.notes);
 		}
 		const untitled = entries.length - valid.length;
 		const ignored = skipped.length + untitled;
@@ -304,17 +306,15 @@ export class CalendarEntryModal extends Modal {
 				t.inputEl.type = "time";
 				t.setValue(d.end ?? "").onChange((v) => (d.end = v || null));
 			});
-		const notes = contentEl.createEl("textarea", { cls: "tg-import-text tg-entry-notes", attr: { placeholder: "Description", dir: "auto", rows: "10" } });
+		const notes = contentEl.createEl("textarea", { cls: "tg-import-text tg-entry-notes", attr: { placeholder: "Description. Use the toolbar for checkboxes, lists and formatting.", dir: "auto", rows: "10" } });
 		notes.value = d.notes;
 		// Grows with the text, so a long description is shown whole (up to most of the screen, then it scrolls).
 		const fit = () => {
 			notes.setCssStyles({ height: "auto" });
 			notes.setCssStyles({ height: `${notes.scrollHeight + 2}px` });
 		};
-		notes.addEventListener("input", () => {
-			d.notes = notes.value;
-			fit();
-		});
+		// An existing entry opens on the preview, so its checkboxes can be ticked right away.
+		attachNotesToolbar(notes, (v) => (d.notes = v), fit, !!this.entry && d.notes.trim() !== "");
 		window.setTimeout(fit, 0);
 		new Setting(contentEl).setName("Done").addToggle((t) => t.setValue(d.done).onChange((v) => (d.done = v)));
 
@@ -340,7 +340,8 @@ export class CalendarEntryModal extends Modal {
 	private async save(): Promise<void> {
 		const d = this.draft;
 		d.title = d.title.trim();
-		d.notes = d.notes.trim();
+		// Only blank lines and trailing spaces go: the first line's indent may be a nested list.
+		d.notes = d.notes.replace(/[ \t]+$/gm, "").replace(/^\n+|\n+$/g, "");
 		if (!isDateString(d.date) || !d.title) {
 			new Notice("An entry needs a title and a day.");
 			return;

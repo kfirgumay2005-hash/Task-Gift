@@ -2660,15 +2660,134 @@
 	flex-basis: 100%;
 	padding-left: 16px;
 	color: var(--text-muted);
-	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	display: -webkit-box;
-	-webkit-line-clamp: 4;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
 }
 
 .tg-cal-entry.is-done .tg-cal-entry-notes {
+	color: var(--text-faint);
+}
+
+.tg-cal-entry-progress {
+	flex: none;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+}
+
+.tg-cal-entry.is-week .tg-cal-entry-progress {
+	margin-left: 16px;
+}
+
+.tg-cal-entry-progress.is-complete {
+	background: color-mix(in srgb, var(--color-green) 20%, transparent);
+	color: var(--color-green);
+}
+
+/* Entry descriptions (a small Markdown subset, see calendars/notes.ts). */
+.tg-note-line {
+	padding-inline-start: calc(var(--tg-note-indent, 0) * 1.1em);
+	white-space: pre-wrap;
+}
+
+.tg-note-line.is-check,
+.tg-note-line.is-list {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.4em;
+	white-space: normal;
+}
+
+.tg-note-line .task-list-item-checkbox {
+	flex: none;
+	margin: 0.2em 0 0;
+	cursor: pointer;
+}
+
+.tg-note-line.is-checked .tg-note-text {
+	text-decoration: line-through;
+	color: var(--text-faint);
+}
+
+.tg-note-marker {
+	flex: none;
+	min-width: 1em;
+	color: var(--text-faint);
+}
+
+.tg-note-text {
+	min-width: 0;
+}
+
+.tg-note-line.is-heading {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.tg-note-gap {
+	height: 0.5em;
+}
+
+.tg-note-line code {
+	font-size: 0.9em;
+}
+
+.tg-notes-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	margin-top: 10px;
+	padding: 3px;
+	border: 1px solid var(--background-modifier-border);
+	border-bottom: none;
+	border-radius: 6px 6px 0 0;
+	background: var(--background-secondary);
+}
+
+.tg-notes-toolbar + .tg-entry-notes {
+	margin-top: 0;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+.tg-notes-btn.is-active {
+	color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.tg-notes-btn:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.tg-notes-sep {
+	width: 1px;
+	height: 18px;
+	margin: 0 3px;
+	background: var(--background-modifier-border);
+}
+
+.tg-notes-preview {
+	min-height: 12em;
+	max-height: 60vh;
+	overflow-y: auto;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 0 0 6px 6px;
+	font-size: var(--font-ui-medium);
+	line-height: 1.6;
+}
+
+.tg-notes-empty {
+	color: var(--text-faint);
+}
+
+.tg-notes-hint {
+	margin-top: 10px;
+	font-size: var(--font-ui-smaller);
 	color: var(--text-faint);
 }
 
