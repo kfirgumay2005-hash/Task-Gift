@@ -66,7 +66,7 @@ export class TaskGiftSettingTab extends PluginSettingTab {
 		return [
 			{
 				name: "Edit modes",
-				desc: "Modes (dates, lists, excluded words, backgrounds, gift sound, victory and music) are edited on the Modes page of the Task Gift view. Changes made on another device appear there as soon as they sync.",
+				desc: "Modes (dates, lists, excluded words, backgrounds, gift sound, victory and music) are edited on the Modes page of gift mode. Changes made on another device appear there as soon as they sync.",
 				render: (setting) => {
 					setting.addButton((b) =>
 						b

@@ -1,4 +1,4 @@
-import { getIcon, Platform, setIcon } from "obsidian";
+import { getIcon, Notice, Platform, setIcon } from "obsidian";
 import { BULLET_LINE_RE, CHECK_LINE_RE, NUMBER_LINE_RE, renderNotes, toggleCheck, uncheckAll } from "../calendars/notes";
 
 type ListKind = "check" | "bullet" | "number";
@@ -27,13 +27,32 @@ function marker(kind: ListKind, n: number): string {
 	return kind === "check" ? "- [ ] " : kind === "bullet" ? "- " : `${n}. `;
 }
 
+/** Copies a description to the clipboard, with a notice either way. */
+export function copyDescription(text: string): void {
+	if (!text.trim()) {
+		new Notice("No description to copy.");
+		return;
+	}
+	navigator.clipboard.writeText(text).then(
+		() => new Notice("Description copied."),
+		() => new Notice("Could not copy the description."),
+	);
+}
+
+export interface NotesToolbar {
+	/** Adds a button before the preview button; it stays usable in the preview. */
+	addButton(iconNames: string[], label: string, run: (e: MouseEvent) => void): HTMLButtonElement;
+	/** Inserts text as its own block: at the caret while editing, otherwise at the end. Switches to editing. */
+	insert(text: string): void;
+}
+
 /**
  * A formatting toolbar over a description textarea: checkboxes, lists, bold / italic / strike / highlight / code,
  * links, headings, and a preview where checkboxes can be ticked. Enter continues a list, Tab / Shift+Tab indent
  * list lines. `onChange` gets the new text after every edit (typing included). With `startInPreview` it opens on the
  * preview (an existing entry: ticking a packing list is what it's opened for most).
  */
-export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: string) => void, fit: () => void, startInPreview = false): void {
+export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: string) => void, fit: () => void, startInPreview = false): NotesToolbar {
 	const toolbar = createDiv({ cls: "tg-notes-toolbar", attr: { role: "toolbar", "aria-label": "Formatting" } });
 	area.before(toolbar);
 	const preview = createDiv({ cls: "tg-notes-preview" });
@@ -144,6 +163,9 @@ export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: 
 			fit();
 			return;
 		}
+		// Redrawing after a tick must not scroll the list (or the window around it) back to the top.
+		const scrolled: [HTMLElement, number][] = [];
+		for (let el: HTMLElement | null = preview; el; el = el.parentElement) if (el.scrollTop) scrolled.push([el, el.scrollTop]);
 		preview.empty();
 		if (!area.value.trim()) preview.createDiv({ cls: "tg-notes-empty", text: "No description yet." });
 		renderNotes(preview, area.value, (line) => {
@@ -152,6 +174,7 @@ export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: 
 			showPreview(true);
 		});
 		preview.createDiv({ cls: "tg-notes-hint", text: "Double-click to edit" });
+		for (const [el, top] of scrolled) el.scrollTop = top;
 	};
 	// Double-click on the text (not a checkbox or link) switches to editing.
 	preview.addEventListener("dblclick", (e) => {
@@ -160,7 +183,7 @@ export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: 
 	});
 
 	const editButtons: HTMLButtonElement[] = [];
-	const button = (iconNames: string[], label: string, run: () => void, edit = true) => {
+	const button = (iconNames: string[], label: string, run: (e: MouseEvent) => void, edit = true) => {
 		const b = toolbar.createEl("button", { cls: "clickable-icon tg-notes-btn", attr: { type: "button", "aria-label": label } });
 		icon(b, ...iconNames);
 		// Keeps the textarea's selection: the button never takes focus on click.
@@ -189,7 +212,8 @@ export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: 
 		const next = uncheckAll(area.value);
 		if (next !== area.value) replace(0, area.value.length, next, area.selectionStart, area.selectionEnd);
 	});
-	toolbar.createDiv({ cls: "tg-spacer" });
+	button(["copy"], "Copy description", () => copyDescription(area.value), false);
+	const spacer = toolbar.createDiv({ cls: "tg-spacer" });
 	const previewBtn = button(["eye"], "Preview (tick checkboxes)", () => showPreview(preview.isShown() === false), false);
 	if (startInPreview) showPreview(true);
 
@@ -231,4 +255,24 @@ export function attachNotesToolbar(area: HTMLTextAreaElement, onChange: (value: 
 			replace(caret, caret, insert, caret + insert.length, caret + insert.length);
 		}
 	});
+
+	return {
+		addButton: (iconNames, label, run) => {
+			const b = button(iconNames, label, run, false);
+			spacer.before(b);
+			return b;
+		},
+		insert: (text) => {
+			const wasPreview = preview.isShown();
+			if (wasPreview) showPreview(false);
+			const v = area.value;
+			const at = wasPreview ? v.length : area.selectionEnd;
+			const before = v.slice(0, at).replace(/[ \t]+$/, "");
+			const after = v.slice(at);
+			const lead = !before.trim() ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+			const trail = !after.trim() ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+			const caret = before.length + lead.length + text.length;
+			replace(before.length, at, lead + text + trail, caret, caret);
+		},
+	};
 }

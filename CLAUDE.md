@@ -52,4 +52,8 @@ not in the settings note (otherwise two devices write the settings note at once 
   its order.
 - Extra calendars (e.g. shifts) never touch Google: one note each in `Calendars/` next to the data note, written in
   the same text format the import parses (`src/calendars/format.ts`), so they sync per file and can be edited by hand.
+- Description templates of calendar entries are notes too, in `Templates/` next to the data note
+  (`src/calendars/templates.ts`), read only when the Templates menu opens. Lines ending with ":" and `___` are
+  fields; a template with fields opens a fill-in form before it's inserted.
+- Modes are switched and edited only from gift mode (the Modes tab and the mode chip show only there).
 - Board columns are folded with their eye button (`settings.collapsedColumns`); there is no "show completed" switch.

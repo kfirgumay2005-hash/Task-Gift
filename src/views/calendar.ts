@@ -145,7 +145,7 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 		}
 	}
 	const addOn = (date: string) => {
-		if (extra) new CalendarEntryModal(plugin.app, plugin.calendars, extra, null, date).open();
+		if (extra) new CalendarEntryModal(plugin.app, plugin.calendars, plugin.templates, extra, null, date).open();
 		else plugin.openTaskModal(undefined, { due: date });
 	};
 	const t0 = today();
@@ -158,7 +158,7 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 	for (let i = 0; i < days; i++) {
 		const date = addDays(from, i);
 		const d = parseDate(date);
-		const cell = grid.createDiv({ cls: "tg-cal-day" });
+		const cell = grid.createDiv({ cls: "tg-cal-day", attr: { "data-date": date } });
 		cell.toggleClass("is-today", date === t0);
 		cell.toggleClass("is-past", date < t0);
 		cell.toggleClass("is-outside", range === "month" && d.getMonth() !== month);
@@ -262,7 +262,7 @@ function renderEntry(parent: HTMLElement, plugin: TaskGiftPlugin, cal: ExtraCale
 			void plugin.calendars.save(cal);
 		});
 	}
-	el.addEventListener("click", () => new CalendarEntryModal(plugin.app, plugin.calendars, cal, e, e.date).open());
+	el.addEventListener("click", () => new CalendarEntryModal(plugin.app, plugin.calendars, plugin.templates, cal, e, e.date).open());
 }
 
 /** A compact one-line entry (month view, and upcoming repeats in the week view). */

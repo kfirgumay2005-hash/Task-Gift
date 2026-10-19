@@ -9,6 +9,7 @@ import { LoginModal } from "./modals/LoginModal";
 import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
 import { calendarsFolderFor, CalendarStore } from "./calendars/store";
+import { templatesFolderFor, TemplateStore } from "./calendars/templates";
 import { CalendarImportModal } from "./modals/CalendarModals";
 import { SyncEngine, SyncStatus } from "./sync/engine";
 import { ChangeSource, TaskStore } from "./sync/store";
@@ -45,6 +46,8 @@ export default class TaskGiftPlugin extends Plugin {
 	engine!: SyncEngine;
 	/** Extra calendars (e.g. shifts), one note each in a folder next to the data note. */
 	calendars!: CalendarStore;
+	/** Description templates for calendar entries, one note each in a folder next to the data note. */
+	templates!: TemplateStore;
 	private dataFile!: DataFile<StoredData>;
 	private settingsFile!: DataFile<StoredSettings>;
 	private settingTab!: TaskGiftSettingTab;
@@ -80,6 +83,7 @@ export default class TaskGiftPlugin extends Plugin {
 		});
 
 		this.calendars = new CalendarStore(this.app, () => calendarsFolderFor(this.dataFile.path), () => this.refreshViewsSoon());
+		this.templates = new TemplateStore(this.app, () => templatesFolderFor(this.dataFile.path));
 
 		this.music = new GiftMusic(this.app);
 		// Gift music plays only while a gift view is on screen.
@@ -748,9 +752,10 @@ export default class TaskGiftPlugin extends Plugin {
 		return this.app.vault.create(path, "");
 	}
 
-	/** Opens the Modes page of the Task Gift view (modes are edited there, not in the settings tab). */
+	/** Opens the Modes page of gift mode (modes are edited there, not in the settings tab). */
 	async openModes(): Promise<void> {
 		(this.app as unknown as { setting?: { close(): void } }).setting?.close();
+		if (!this.settings.giftMode) await this.setGiftMode(true);
 		await this.activateView();
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof TaskView) leaf.view.showModes();
 		this.updateMusic();

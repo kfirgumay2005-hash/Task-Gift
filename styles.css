@@ -2885,3 +2885,62 @@
 	cursor: pointer;
 }
 
+
+/* Copy button in the corner of a task's notes. */
+.tg-notes-wrap {
+	position: relative;
+	width: 100%;
+}
+
+.tg-notes-wrap .tg-notes-input {
+	padding-inline-end: 32px;
+}
+
+.tg-notes-copy {
+	position: absolute;
+	top: 4px;
+	inset-inline-end: 4px;
+	opacity: 0.6;
+}
+
+.tg-notes-copy:hover {
+	opacity: 1;
+}
+
+/* Filling in a description template. */
+.tg-template-form {
+	max-height: 60vh;
+	overflow-y: auto;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	line-height: 1.6;
+}
+
+.tg-template-line {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 4px 6px;
+	padding-inline-start: calc(var(--tg-note-indent, 0) * 1.4em);
+	margin: 3px 0;
+}
+
+.tg-template-line.is-text {
+	display: block;
+	font-weight: var(--font-semibold);
+}
+
+.tg-template-blank {
+	width: 6em;
+	min-width: 0;
+}
+
+.tg-template-answer {
+	flex: 1 1 12em;
+	min-width: 8em;
+	min-height: 0;
+	resize: none;
+	overflow: hidden;
+	line-height: 1.4;
+}

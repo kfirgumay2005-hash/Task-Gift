@@ -1,12 +1,14 @@
 import { App, Modal, Notice, Setting, setIcon } from "obsidian";
 import { TASK_COLORS, taskColorCss } from "../defaults";
-import { CalendarEntry, isValidEntry, mergeEntries, parseEntries, timeLabel } from "../calendars/format";
+import { CalendarEntry, isValidEntry, mergeEntries, parseEntries, replacedEntries, ReplaceMode, timeLabel } from "../calendars/format";
 import type { CalendarStore, ExtraCalendar } from "../calendars/store";
 import type { NamedTaskColor, TaskColor } from "../types";
 import { isDateString, shortDate } from "../util/dates";
 import { renderNotes } from "../calendars/notes";
 import { ConfirmModal } from "./ConfirmModal";
 import { attachNotesToolbar } from "./NotesEditor";
+import type { TemplateStore } from "../calendars/templates";
+import { showTemplatesMenu } from "./TemplateModals";
 
 /** Color swatches (no color + the built-in colors) for a calendar. */
 function renderSwatches(parent: HTMLElement, current: () => TaskColor | null, onPick: (c: TaskColor | null) => void): void {
@@ -126,7 +128,7 @@ export class CalendarEditModal extends Modal {
 /** Pastes text (e.g. a shift schedule an AI read from a picture) into a calendar. */
 export class CalendarImportModal extends Modal {
 	private text = "";
-	private replaceDays = true;
+	private replace: ReplaceMode = "matching";
 	/** Path of the target calendar; "" = create a new one named `newName`. */
 	private target: string;
 	private newName = "";
@@ -171,6 +173,7 @@ export class CalendarImportModal extends Modal {
 			d.setValue(this.target).onChange((v) => {
 				this.target = v;
 				newRow.settingEl.toggle(v === "");
+				this.renderPreview();
 			});
 		});
 		const newRow = new Setting(contentEl).setName("New calendar name").addText((t) => {
@@ -179,9 +182,19 @@ export class CalendarImportModal extends Modal {
 		});
 		newRow.settingEl.toggle(this.target === "");
 		new Setting(contentEl)
-			.setName("Replace entries on these days")
-			.setDesc("Entries already on the imported days are replaced, so importing an updated schedule doesn't duplicate it.")
-			.addToggle((t) => t.setValue(this.replaceDays).onChange((v) => (this.replaceDays = v)));
+			.setName("Existing entries on these days")
+			.setDesc("Replace matching: entries with the same title as an imported one (or the same start time) are updated, so a new schedule replaces the old shifts but keeps anything else on those days.")
+			.addDropdown((d) =>
+				d
+					.addOption("matching", "Replace matching")
+					.addOption("days", "Replace all")
+					.addOption("none", "Keep all")
+					.setValue(this.replace)
+					.onChange((v) => {
+						this.replace = v as ReplaceMode;
+						this.renderPreview();
+					}),
+			);
 
 		this.previewEl = contentEl.createDiv({ cls: "tg-import-preview" });
 		this.renderPreview();
@@ -208,9 +221,13 @@ export class CalendarImportModal extends Modal {
 		}
 		const dates = valid.map((e) => e.date).sort();
 		const days = new Set(dates).size;
+		const target = this.calendars.get(this.target);
+		const replaced = target ? replacedEntries(target.entries, valid, this.replace).length : 0;
 		el.createDiv({
 			cls: "tg-import-summary",
-			text: `${valid.length} entr${valid.length === 1 ? "y" : "ies"} on ${days} day${days === 1 ? "" : "s"} (${shortDate(dates[0])} – ${shortDate(dates[dates.length - 1])})`,
+			text:
+				`${valid.length} entr${valid.length === 1 ? "y" : "ies"} on ${days} day${days === 1 ? "" : "s"} (${shortDate(dates[0])} – ${shortDate(dates[dates.length - 1])})` +
+				(replaced ? ` · replaces ${replaced} existing` : ""),
 		});
 		const list = el.createDiv({ cls: "tg-import-list" });
 		for (const e of valid) {
@@ -246,7 +263,7 @@ export class CalendarImportModal extends Modal {
 				}
 				cal = await this.calendars.create(this.newName, "blue");
 			}
-			cal.entries = mergeEntries(cal.entries, entries, this.replaceDays);
+			cal.entries = mergeEntries(cal.entries, entries, this.replace);
 			await this.calendars.save(cal);
 			new Notice(`Imported ${entries.length} entr${entries.length === 1 ? "y" : "ies"} into ${cal.name}.`);
 			this.close();
@@ -268,6 +285,7 @@ export class CalendarEntryModal extends Modal {
 	constructor(
 		app: App,
 		private readonly calendars: CalendarStore,
+		private readonly templates: TemplateStore,
 		private readonly cal: ExtraCalendar,
 		/** null = a new entry. */
 		private readonly entry: CalendarEntry | null,
@@ -314,7 +332,8 @@ export class CalendarEntryModal extends Modal {
 			notes.setCssStyles({ height: `${notes.scrollHeight + 2}px` });
 		};
 		// An existing entry opens on the preview, so its checkboxes can be ticked right away.
-		attachNotesToolbar(notes, (v) => (d.notes = v), fit, !!this.entry && d.notes.trim() !== "");
+		const toolbar = attachNotesToolbar(notes, (v) => (d.notes = v), fit, !!this.entry && d.notes.trim() !== "");
+		toolbar.addButton(["layout-template", "file-text"], "Templates", (e) => void showTemplatesMenu(this.app, this.templates, e, () => d.notes, (text) => toolbar.insert(text)));
 		window.setTimeout(fit, 0);
 		new Setting(contentEl).setName("Done").addToggle((t) => t.setValue(d.done).onChange((v) => (d.done = v)));
 

@@ -130,8 +130,22 @@ export class TaskView extends ItemView {
 			const results = this.bodyEl.querySelector(".tg-search-results");
 			if (results) results.scrollTop = scroll;
 		} else if (mode === "calendar") {
+			// Ticking a checkbox in an entry redraws the calendar: keep the grid's and each day's scroll.
+			const gridScroll = this.bodyEl.querySelector(".tg-cal-grid")?.scrollTop ?? 0;
+			const dayScroll = new Map<string, number>();
+			this.bodyEl.querySelectorAll<HTMLElement>(".tg-cal-day").forEach((c) => {
+				const items = c.querySelector(".tg-cal-items");
+				if (c.dataset.date && items?.scrollTop) dayScroll.set(c.dataset.date, items.scrollTop);
+			});
 			this.bodyEl.empty();
 			renderCalendar(this.bodyEl, this.plugin, this.calendarUi, () => this.renderMainBody("calendar"));
+			const grid = this.bodyEl.querySelector(".tg-cal-grid");
+			if (grid) grid.scrollTop = gridScroll;
+			this.bodyEl.querySelectorAll<HTMLElement>(".tg-cal-day").forEach((c) => {
+				const items = c.querySelector(".tg-cal-items");
+				const top = c.dataset.date ? dayScroll.get(c.dataset.date) : undefined;
+				if (items && top) items.scrollTop = top;
+			});
 		} else {
 			this.renderBoardBody();
 		}
@@ -194,32 +208,35 @@ export class TaskView extends ItemView {
 		mk("board", "layout-dashboard", "Board");
 		mk("calendar", "calendar-days", "Calendar");
 		mk("gift", "gift", "Gift");
-		mk("modes", "layers", "Modes");
+		// Modes only affect gifts, so they are switched and edited only from gift mode.
+		const giftSide = mode === "gift" || mode === "modes";
+		if (giftSide) mk("modes", "layers", "Modes");
 
-		const current = activeMode(p.settings);
-		const modeChip = left.createEl("button", {
-			cls: "tg-filter-chip tg-mode-chip",
-			attr: { "aria-label": `Mode: ${current.name} · ${describeFilter(current.filter)} (gifts)
-Click to switch` },
-		});
-		setIcon(modeChip.createSpan(), "layers");
-		modeChip.createSpan({ cls: "tg-mode-chip-name", text: current.name });
-		if (mode === "gift") modeChip.createSpan({ cls: "tg-mode-chip-filter", text: describeFilter(current.filter) });
-		setIcon(modeChip.createSpan({ cls: "tg-mode-chip-caret" }), "chevron-down");
-		modeChip.addEventListener("click", (e) => {
-			const menu = new Menu();
-			for (const m of p.settings.modes) {
-				menu.addItem((i) =>
-					i
-						.setTitle(m.name)
-						.setChecked(m.id === current.id)
-						.onClick(() => void p.setActiveMode(m.id)),
-				);
-			}
-			menu.addSeparator();
-			menu.addItem((i) => i.setTitle("Edit modes…").setIcon("pencil").onClick(() => this.showModes()));
-			menu.showAtMouseEvent(e);
-		});
+		if (giftSide) {
+			const current = activeMode(p.settings);
+			const modeChip = left.createEl("button", {
+				cls: "tg-filter-chip tg-mode-chip",
+				attr: { "aria-label": `Mode: ${current.name} · ${describeFilter(current.filter)} (gifts)\nClick to switch` },
+			});
+			setIcon(modeChip.createSpan(), "layers");
+			modeChip.createSpan({ cls: "tg-mode-chip-name", text: current.name });
+			if (mode === "gift") modeChip.createSpan({ cls: "tg-mode-chip-filter", text: describeFilter(current.filter) });
+			setIcon(modeChip.createSpan({ cls: "tg-mode-chip-caret" }), "chevron-down");
+			modeChip.addEventListener("click", (e) => {
+				const menu = new Menu();
+				for (const m of p.settings.modes) {
+					menu.addItem((i) =>
+						i
+							.setTitle(m.name)
+							.setChecked(m.id === current.id)
+							.onClick(() => void p.setActiveMode(m.id)),
+					);
+				}
+				menu.addSeparator();
+				menu.addItem((i) => i.setTitle("Edit modes…").setIcon("pencil").onClick(() => this.showModes()));
+				menu.showAtMouseEvent(e);
+			});
+		}
 
 		const right = h.createDiv({ cls: "tg-header-right" });
 		if (mode === "board" || mode === "calendar") this.renderSearch(right, mode);

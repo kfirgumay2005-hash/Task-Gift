@@ -221,13 +221,30 @@ function sameSlot(a: CalendarEntry, b: CalendarEntry): boolean {
 }
 
 /**
- * Adds imported entries. With `replaceDays`, entries already on the imported days are replaced (re-importing an
- * updated weekly schedule doesn't duplicate it); an entry that comes back unchanged keeps its done mark.
+ * What an import does with entries already on the imported days: keep them all, replace the ones it updates
+ * ("matching": same title as an imported entry, or the same start time on that day — e.g. the shifts, but not a
+ * packing list added by hand), or replace everything on those days.
  */
-export function mergeEntries(existing: CalendarEntry[], incoming: CalendarEntry[], replaceDays: boolean): CalendarEntry[] {
+export type ReplaceMode = "none" | "matching" | "days";
+
+/** Existing entries the import replaces. */
+export function replacedEntries(existing: CalendarEntry[], incoming: CalendarEntry[], mode: ReplaceMode): CalendarEntry[] {
+	if (mode === "none") return [];
 	const days = new Set(incoming.map((e) => e.date));
-	const removed = replaceDays ? existing.filter((e) => days.has(e.date)) : [];
-	const result = replaceDays ? existing.filter((e) => !days.has(e.date)) : [...existing];
+	if (mode === "days") return existing.filter((e) => days.has(e.date));
+	const titles = new Set(incoming.map((e) => e.title.trim().toLowerCase()));
+	return existing.filter(
+		(e) => days.has(e.date) && (titles.has(e.title.trim().toLowerCase()) || (!!e.start && incoming.some((i) => i.date === e.date && i.start === e.start))),
+	);
+}
+
+/**
+ * Adds imported entries, replacing the existing ones `mode` picks (re-importing an updated weekly schedule doesn't
+ * duplicate it); an entry that comes back unchanged keeps its done mark.
+ */
+export function mergeEntries(existing: CalendarEntry[], incoming: CalendarEntry[], mode: ReplaceMode): CalendarEntry[] {
+	const removed = replacedEntries(existing, incoming, mode);
+	const result = existing.filter((e) => !removed.includes(e));
 	for (const e of incoming) {
 		if (result.some((r) => sameSlot(r, e) && r.notes === e.notes)) continue;
 		const before = removed.find((r) => sameSlot(r, e));

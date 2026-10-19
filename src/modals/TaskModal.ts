@@ -5,6 +5,7 @@ import { isLastWeekdayOfMonth, nthOfMonth, ruleFromPreset } from "../recurrence/
 import { addDays, addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT, weekday } from "../util/dates";
 import { TASK_COLORS, taskColorCss } from "../defaults";
 import { ConfirmModal } from "./ConfirmModal";
+import { copyDescription } from "./NotesEditor";
 
 type RepeatChoice = "none" | RecurrencePreset;
 
@@ -107,9 +108,13 @@ export class TaskModal extends Modal {
 		});
 
 		const notesRow = this.row(form, "align-left", "Notes");
-		const notesInput = notesRow.createEl("textarea", { cls: "tg-input tg-notes-input", attr: { rows: "3", placeholder: "Add details", dir: "auto" } });
+		const notesWrap = notesRow.createDiv({ cls: "tg-notes-wrap" });
+		const notesInput = notesWrap.createEl("textarea", { cls: "tg-input tg-notes-input", attr: { rows: "3", placeholder: "Add details", dir: "auto" } });
 		notesInput.value = this.notes;
 		notesInput.addEventListener("input", () => (this.notes = notesInput.value));
+		const copy = notesWrap.createEl("button", { cls: "clickable-icon tg-notes-copy", attr: { type: "button", "aria-label": "Copy description" } });
+		setIcon(copy, "copy");
+		copy.addEventListener("click", () => copyDescription(this.notes));
 
 		const listRow = this.row(form, "list", "List");
 		const listSelect = listRow.createEl("select", { cls: "dropdown" });
