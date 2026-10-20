@@ -95,6 +95,29 @@ export type NamedTaskColor = "red" | "orange" | "yellow" | "green" | "cyan" | "b
 /** A built-in color name or a custom "#rrggbb" color. */
 export type TaskColor = NamedTaskColor | `#${string}`;
 
+export type DayTitleSize = "small" | "normal" | "large" | "huge";
+
+/** A run of a day heading's text with its own color (null = the heading's color). */
+export interface DayTitlePart {
+	text: string;
+	color: TaskColor | null;
+}
+
+/** The heading of a day ("what today is about"), shown in the view's header. */
+export interface DayTitle {
+	text: string;
+	/** Set when some letters have their own color; their texts joined equal `text`. */
+	parts?: DayTitlePart[];
+	color: TaskColor | null;
+	size: DayTitleSize;
+	bold: boolean;
+	italic: boolean;
+	/** Drawn on a tinted pill. */
+	highlight: boolean;
+	/** Date.now() of the last edit; the newer one wins when two devices edited the same day. */
+	updated: number;
+}
+
 /** Where task colors are shown. */
 export type TaskColorScope = "both" | "board" | "calendar" | "off";
 
@@ -227,6 +250,8 @@ export interface StoreData {
 	spawned: Record<string, string>;
 	/** Temporary local IDs that were replaced by Google IDs (old -> new). */
 	aliases: Record<string, string>;
+	/** Day headings, keyed by date (YYYY-MM-DD). A cleared one stays with empty text so the clearing syncs. */
+	dayTitles: Record<string, DayTitle>;
 	lastSyncAt: string | null;
 	lastFullSyncAt: string | null;
 	gift: GiftState;

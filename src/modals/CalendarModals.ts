@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Setting, setIcon } from "obsidian";
 import { TASK_COLORS, taskColorCss } from "../defaults";
-import { CalendarEntry, isValidEntry, mergeEntries, parseEntries, replacedEntries, ReplaceMode, timeLabel } from "../calendars/format";
+import { CalendarEntry, insertEntry, isValidEntry, mergeEntries, parseEntries, replacedEntries, ReplaceMode, timeLabel } from "../calendars/format";
 import type { CalendarStore, ExtraCalendar } from "../calendars/store";
 import type { NamedTaskColor, TaskColor } from "../types";
 import { isDateString, shortDate } from "../util/dates";
@@ -368,8 +368,15 @@ export class CalendarEntryModal extends Modal {
 		if (!d.start) d.end = null;
 		const cal = this.current();
 		if (!cal) return;
-		if (this.entry) Object.assign(this.entry, d);
-		else cal.entries.push(d);
+		if (this.entry) {
+			// Keeps its place in the day unless its day or start time changed.
+			const moved = this.entry.date !== d.date || this.entry.start !== d.start;
+			Object.assign(this.entry, d);
+			if (moved) {
+				cal.entries = cal.entries.filter((e) => e !== this.entry);
+				insertEntry(cal.entries, this.entry);
+			}
+		} else insertEntry(cal.entries, d);
 		await this.calendars.save(cal);
 		this.close();
 	}

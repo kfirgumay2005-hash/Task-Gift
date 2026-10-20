@@ -1,6 +1,6 @@
 import { App, normalizePath, TFile } from "obsidian";
 import type { TaskColor } from "../types";
-import { CalendarEntry, compareEntries, formatEntry, parseEntries } from "./format";
+import { CalendarEntry, formatEntry, parseEntries, sortByDay } from "./format";
 
 /** Folder (next to the data note) holding one note per extra calendar. */
 export const CALENDARS_FOLDER = "Calendars";
@@ -29,7 +29,7 @@ function parseNote(path: string, content: string): ExtraCalendar {
 	const color = fm ? /^color:\s*["']?([#\w]+)["']?\s*$/m.exec(fm[1])?.[1] ?? null : null;
 	const body = fm ? content.slice(fm[0].length) : content;
 	const name = path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
-	return { path, name, color: color as TaskColor | null, entries: parseEntries(body).entries.sort(compareEntries) };
+	return { path, name, color: color as TaskColor | null, entries: sortByDay(parseEntries(body).entries) };
 }
 
 function serializeNote(cal: ExtraCalendar): string {
@@ -111,7 +111,7 @@ export class CalendarStore {
 
 	/** Writes the calendar's note. */
 	async save(cal: ExtraCalendar): Promise<void> {
-		cal.entries.sort(compareEntries);
+		sortByDay(cal.entries);
 		const content = serializeNote(cal);
 		const file = this.app.vault.getAbstractFileByPath(cal.path);
 		if (file instanceof TFile) await this.app.vault.modify(file, content);

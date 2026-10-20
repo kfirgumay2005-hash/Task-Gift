@@ -262,6 +262,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private static mergeStore(raw: Partial<StoreData> | undefined): StoreData {
 		const store = Object.assign(emptyStore(), raw ?? {});
 		if (!store.taskModes || typeof store.taskModes !== "object") store.taskModes = {};
+		if (!store.dayTitles || typeof store.dayTitles !== "object") store.dayTitles = {};
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
 		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
 		return store;
@@ -404,6 +405,9 @@ export default class TaskGiftPlugin extends Plugin {
 				d.taskModes = { ...d.taskModes, ...inc.taskModes };
 				d.spawned = { ...d.spawned, ...inc.spawned };
 				d.aliases = { ...d.aliases, ...inc.aliases };
+				for (const [date, t] of Object.entries(inc.dayTitles)) {
+					if (!d.dayTitles[date] || t.updated > d.dayTitles[date].updated) d.dayTitles[date] = t;
+				}
 				d.gift = inc.gift;
 				for (const l of Object.values(inc.lists)) if (!d.lists[l.id]) d.lists[l.id] = l;
 			}

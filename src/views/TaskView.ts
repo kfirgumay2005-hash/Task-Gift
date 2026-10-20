@@ -4,6 +4,7 @@ import { VIEW_TYPE } from "../defaults";
 import { describeFilter } from "../filters/dates";
 import { activeMode } from "../modes";
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from "../defaults";
+import { DEFAULT_DAY_TITLE, DayTitleModal, renderDayTitle } from "../modals/DayTitleModal";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
 import { today } from "../util/dates";
@@ -238,6 +239,8 @@ export class TaskView extends ItemView {
 			});
 		}
 
+		if (mode !== "modes") this.renderDayTitle(h);
+
 		const right = h.createDiv({ cls: "tg-header-right" });
 		if (mode === "board" || mode === "calendar") this.renderSearch(right, mode);
 		if (mode === "board") {
@@ -290,6 +293,31 @@ export class TaskView extends ItemView {
 			menu.addItem((i) => i.setTitle("Insert today's tasks into daily note").setIcon("calendar-check").onClick(() => void p.insertIntoDailyNote()));
 			menu.addItem((i) => i.setTitle("Settings").setIcon("settings").onClick(() => this.openSettings()));
 			menu.showAtMouseEvent(e);
+		});
+	}
+
+	/** Today's heading ("what today is about"), between the view tabs and the search; click to write or style it. */
+	private renderDayTitle(parent: HTMLElement): void {
+		const store = this.plugin.store;
+		const date = today();
+		const current = store.dayTitle(date);
+		const slot = parent.createDiv({ cls: "tg-day-title-slot" });
+		// Not a <button>: Obsidian's and the themes' button styles would override the heading's color and background.
+		const btn = slot.createDiv({ attr: { role: "button", tabindex: "0", "aria-label": current ? "Edit today's topic" : "Add a topic for today" } });
+		renderDayTitle(btn, current ?? { ...DEFAULT_DAY_TITLE, text: "" }, "+ Today's topic");
+		btn.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter" && e.key !== " ") return;
+			e.preventDefault();
+			btn.click();
+		});
+		btn.addEventListener("click", () => {
+			const last = store.lastDayTitle();
+			// A new day starts with the last heading's style, not its text or letter colors.
+			const start = current ?? { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined };
+			new DayTitleModal(this.app, date, start, (t) => {
+				store.setDayTitle(date, t);
+				this.plugin.touch();
+			}).open();
 		});
 	}
 

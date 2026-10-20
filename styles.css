@@ -2944,3 +2944,128 @@
 	overflow: hidden;
 	line-height: 1.4;
 }
+
+/* ------------------------------------------------------------- day title (header) */
+
+.tg-day-title-slot {
+	flex: 1 1 120px;
+	min-width: 0;
+	display: flex;
+	justify-content: center;
+}
+
+.tg-day-title {
+	--tg-day-title-color: var(--text-normal);
+	display: inline-flex;
+	align-items: center;
+	max-width: 100%;
+	min-width: 0;
+	height: auto;
+	padding: 2px 10px;
+	border: none;
+	border-radius: 999px;
+	background: transparent;
+	box-shadow: none;
+	color: var(--tg-day-title-color);
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-normal);
+	line-height: 1.3;
+	cursor: pointer;
+}
+
+.tg-day-title-text {
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.tg-day-title.has-color {
+	--tg-day-title-color: var(--tg-task-color);
+}
+
+.tg-day-title.is-small {
+	font-size: var(--font-ui-small);
+}
+
+.tg-day-title.is-large {
+	font-size: 1.25em;
+}
+
+.tg-day-title.is-huge {
+	font-size: 1.6em;
+}
+
+.tg-day-title.is-bold {
+	font-weight: var(--font-bold);
+}
+
+.tg-day-title.is-italic {
+	font-style: italic;
+}
+
+.tg-day-title.is-highlight {
+	background: color-mix(in srgb, var(--tg-day-title-color) 16%, transparent);
+	padding: 3px 14px;
+}
+
+.tg-day-title:hover {
+	background: var(--background-modifier-hover);
+}
+
+.tg-day-title.is-highlight:hover {
+	background: color-mix(in srgb, var(--tg-day-title-color) 24%, transparent);
+}
+
+.tg-day-title.is-empty {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-normal);
+	font-style: normal;
+	background: transparent;
+}
+
+.tg-day-title.is-empty:hover {
+	color: var(--text-muted);
+	background: var(--background-modifier-hover);
+}
+
+.tg-day-title-preview {
+	display: flex;
+	justify-content: center;
+	padding: 14px 8px;
+	margin-bottom: 8px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+
+.tg-day-title-preview .tg-day-title {
+	cursor: default;
+}
+
+.tg-day-title-preview .tg-day-title-text {
+	white-space: normal;
+}
+
+.tg-day-title:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 2px;
+}
+
+.tg-day-title-input {
+	min-width: 220px;
+	max-width: 100%;
+}
+
+.tg-day-title-hint.is-selection {
+	color: var(--text-accent);
+}
+
+/* ------------------------------------------------------------- calendar entry drop marks */
+
+.tg-cal-entry.is-drop-before {
+	box-shadow: 0 -2px 0 var(--interactive-accent);
+}
+
+.tg-cal-entry.is-drop-after {
+	box-shadow: 0 2px 0 var(--interactive-accent);
+}

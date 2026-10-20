@@ -1,6 +1,9 @@
-import type { RecurrenceRule, StoreData, Task, TaskColor, TaskList } from "../types";
+import type { DayTitle, RecurrenceRule, StoreData, Task, TaskColor, TaskList } from "../types";
 import { nextOccurrence } from "../recurrence/rule";
-import { today } from "../util/dates";
+import { addDays, today } from "../util/dates";
+
+/** Day headings older than this many days are dropped. */
+const KEEP_DAY_TITLES_DAYS = 60;
 
 export const LOCAL_PREFIX = "local-";
 
@@ -92,6 +95,25 @@ export class TaskStore {
 
 	rule(id: string): RecurrenceRule | null {
 		return this.data.recurrence[id] ?? null;
+	}
+
+	/** The day's heading, or null when it has none. */
+	dayTitle(date: string): DayTitle | null {
+		const t = this.data.dayTitles[date];
+		return t?.text ? t : null;
+	}
+
+	/** The style of the most recent heading, so a new day starts looking like the last one. */
+	lastDayTitle(): DayTitle | null {
+		const dates = Object.keys(this.data.dayTitles).filter((d) => this.data.dayTitles[d].text).sort();
+		return dates.length ? this.data.dayTitles[dates[dates.length - 1]] : null;
+	}
+
+	/** Sets (or, with empty text, clears) a day's heading. Local only: it never reaches Google. */
+	setDayTitle(date: string, title: Omit<DayTitle, "updated">): void {
+		this.data.dayTitles[date] = { ...title, text: title.text.trim(), updated: Date.now() };
+		const cutoff = addDays(today(), -KEEP_DAY_TITLES_DAYS);
+		for (const d of Object.keys(this.data.dayTitles)) if (d < cutoff) delete this.data.dayTitles[d];
 	}
 
 	children(id: string): Task[] {

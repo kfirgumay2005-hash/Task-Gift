@@ -1,6 +1,6 @@
 import { Menu, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
-import { CalendarEntry, timeLabel } from "../calendars/format";
+import { CalendarEntry, moveEntry, stepEntry, timeLabel } from "../calendars/format";
 import { checklistCount, renderNotes, toggleCheck } from "../calendars/notes";
 import type { ExtraCalendar } from "../calendars/store";
 import { taskColorCss } from "../defaults";
@@ -9,6 +9,10 @@ import type { CalendarRange, Task } from "../types";
 import { describeRule, occurrencesBetween } from "../recurrence/rule";
 import { addDays, addMonths, daysInMonth, MONTH_SHORT, parseDate, startOfWeek, today, toDateString, WEEKDAY_SHORT } from "../util/dates";
 import { applyTaskColor, openCardMenu, renderCard } from "./card";
+
+/** Entry of an extra calendar being dragged (entries are plain objects, so they are passed here, not by ID). */
+let draggedEntry: CalendarEntry | null = null;
+const ENTRY_DRAG_TYPE = "text/x-task-gift-entry";
 
 /** View-local (not saved) calendar state. */
 export interface CalendarUiState {
@@ -184,7 +188,8 @@ export function renderCalendar(container: HTMLElement, plugin: TaskGiftPlugin, u
 		cell.addEventListener("dblclick", (ev) => {
 			if (ev.target === cell || ev.target === items || ev.target === head) addOn(date);
 		});
-		if (!extra) enableDrop(cell, plugin, date);
+		if (extra) enableEntryDrop(cell, plugin, extra, date);
+		else enableDrop(cell, plugin, date);
 	}
 }
 
@@ -262,7 +267,84 @@ function renderEntry(parent: HTMLElement, plugin: TaskGiftPlugin, cal: ExtraCale
 			void plugin.calendars.save(cal);
 		});
 	}
-	el.addEventListener("click", () => new CalendarEntryModal(plugin.app, plugin.calendars, plugin.templates, cal, e, e.date).open());
+	const open = () => new CalendarEntryModal(plugin.app, plugin.calendars, plugin.templates, cal, e, e.date).open();
+	el.addEventListener("click", open);
+
+	const step = (dir: -1 | 1) => {
+		if (stepEntry(cal.entries, e, dir)) void plugin.calendars.save(cal);
+	};
+	el.addEventListener("contextmenu", (ev) => {
+		ev.preventDefault();
+		const sameDay = cal.entries.filter((x) => x.date === e.date);
+		const menu = new Menu();
+		menu.addItem((i) => i.setTitle("Edit…").setIcon("pencil").onClick(open));
+		menu.addItem((i) => i.setTitle("Move up").setIcon("arrow-up").setDisabled(sameDay[0] === e).onClick(() => step(-1)));
+		menu.addItem((i) => i.setTitle("Move down").setIcon("arrow-down").setDisabled(sameDay[sameDay.length - 1] === e).onClick(() => step(1)));
+		menu.showAtMouseEvent(ev);
+	});
+
+	// Dragged onto another entry it goes above or below it (by the pointer's half); onto a day, to the end of that day.
+	el.draggable = true;
+	el.addEventListener("dragstart", (ev) => {
+		draggedEntry = e;
+		ev.dataTransfer?.setData(ENTRY_DRAG_TYPE, "");
+		ev.dataTransfer?.setData("text/plain", e.title);
+		if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
+		el.addClass("is-dragging");
+	});
+	el.addEventListener("dragend", () => {
+		draggedEntry = null;
+		el.removeClass("is-dragging");
+	});
+	const below = (ev: DragEvent) => {
+		const r = el.getBoundingClientRect();
+		return ev.clientY > r.top + r.height / 2;
+	};
+	const clearMark = () => el.removeClasses(["is-drop-before", "is-drop-after"]);
+	el.addEventListener("dragover", (ev) => {
+		if (!draggedEntry || !ev.dataTransfer?.types.includes(ENTRY_DRAG_TYPE)) return;
+		ev.preventDefault();
+		ev.stopPropagation();
+		ev.dataTransfer.dropEffect = "move";
+		el.closest(".tg-cal-day")?.removeClass("is-drop-target");
+		const after = below(ev);
+		el.toggleClass("is-drop-before", !after && draggedEntry !== e);
+		el.toggleClass("is-drop-after", after && draggedEntry !== e);
+	});
+	el.addEventListener("dragleave", clearMark);
+	el.addEventListener("drop", (ev) => {
+		if (!draggedEntry) return;
+		ev.preventDefault();
+		ev.stopPropagation();
+		clearMark();
+		const moving = draggedEntry;
+		draggedEntry = null;
+		if (moving === e || !cal.entries.includes(moving)) return;
+		const day = cal.entries.filter((x) => x.date === e.date && x !== moving);
+		const before = below(ev) ? day[day.indexOf(e) + 1] ?? null : e;
+		if (moveEntry(cal.entries, moving, e.date, before)) void plugin.calendars.save(cal);
+	});
+}
+
+/** Dropping an entry on a day (not on another entry) moves it to the end of that day. */
+function enableEntryDrop(cell: HTMLElement, plugin: TaskGiftPlugin, cal: ExtraCalendar, date: string): void {
+	cell.addEventListener("dragover", (e) => {
+		if (!draggedEntry || !e.dataTransfer?.types.includes(ENTRY_DRAG_TYPE)) return;
+		e.preventDefault();
+		e.dataTransfer.dropEffect = "move";
+		cell.addClass("is-drop-target");
+	});
+	cell.addEventListener("dragleave", (e) => {
+		if (!cell.contains(e.relatedTarget as Node | null)) cell.removeClass("is-drop-target");
+	});
+	cell.addEventListener("drop", (e) => {
+		cell.removeClass("is-drop-target");
+		if (!draggedEntry) return;
+		e.preventDefault();
+		const moving = draggedEntry;
+		draggedEntry = null;
+		if (cal.entries.includes(moving) && moveEntry(cal.entries, moving, date, null)) void plugin.calendars.save(cal);
+	});
 }
 
 /** A compact one-line entry (month view, and upcoming repeats in the week view). */

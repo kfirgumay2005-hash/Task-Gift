@@ -179,12 +179,28 @@ export function parseEntries(text: string): ParseResult {
 	return { entries: unique, skipped };
 }
 
+/** Default order: by day, all-day entries first, then by start time. */
 export function compareEntries(a: CalendarEntry, b: CalendarEntry): number {
 	if (a.date !== b.date) return a.date < b.date ? -1 : 1;
 	const at = a.start ?? "";
 	const bt = b.start ?? "";
 	if (at !== bt) return at < bt ? -1 : 1;
 	return a.title.localeCompare(b.title);
+}
+
+/**
+ * Sorts by day only, keeping the order within a day (it is the order in the note, which can be changed by hand or by
+ * dragging entries in the calendar).
+ */
+export function sortByDay(entries: CalendarEntry[]): CalendarEntry[] {
+	return entries.sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
+}
+
+/** Adds an entry to a list sorted by day: before the first entry of its day that would come after it by time. */
+export function insertEntry(entries: CalendarEntry[], e: CalendarEntry): void {
+	const at = entries.findIndex((x) => x.date > e.date || (x.date === e.date && compareEntries(x, e) > 0));
+	if (at === -1) entries.push(e);
+	else entries.splice(at, 0, e);
 }
 
 export function timeLabel(e: CalendarEntry): string {
@@ -244,13 +260,54 @@ export function replacedEntries(existing: CalendarEntry[], incoming: CalendarEnt
  */
 export function mergeEntries(existing: CalendarEntry[], incoming: CalendarEntry[], mode: ReplaceMode): CalendarEntry[] {
 	const removed = replacedEntries(existing, incoming, mode);
-	const result = existing.filter((e) => !removed.includes(e));
+	/** Replaced entries whose place in the day no imported entry has taken yet. */
+	const free = new Set(removed);
+	const result = sortByDay([...existing]);
 	for (const e of incoming) {
-		if (result.some((r) => sameSlot(r, e) && r.notes === e.notes)) continue;
+		if (result.some((r) => !free.has(r) && sameSlot(r, e) && r.notes === e.notes)) continue;
 		const before = removed.find((r) => sameSlot(r, e));
-		result.push({ ...e, done: e.done || (before?.done ?? false) });
+		const entry = { ...e, done: e.done || (before?.done ?? false) };
+		// An updated entry takes the place of the one it replaces, so an order set by hand is kept.
+		const title = e.title.trim().toLowerCase();
+		const sameDay = [...free].filter((r) => r.date === e.date);
+		const slot = sameDay.find((r) => sameSlot(r, e)) ?? sameDay.find((r) => r.title.trim().toLowerCase() === title || (!!r.start && r.start === e.start));
+		if (slot) {
+			result[result.indexOf(slot)] = entry;
+			free.delete(slot);
+		} else insertEntry(result, entry);
 	}
-	return result.sort(compareEntries);
+	return result.filter((r) => !free.has(r));
+}
+
+/**
+ * Moves an entry to `date`, right before `before` (an entry on that day), or to the end of the day without it.
+ * Returns false when nothing changed.
+ */
+export function moveEntry(entries: CalendarEntry[], e: CalendarEntry, date: string, before: CalendarEntry | null): boolean {
+	if (before === e) return false;
+	sortByDay(entries);
+	const oldIndex = entries.indexOf(e);
+	if (oldIndex === -1) return false;
+	const oldDate = e.date;
+	entries.splice(oldIndex, 1);
+	e.date = date;
+	let at = before ? entries.indexOf(before) : -1;
+	if (at === -1) {
+		const next = entries.findIndex((x) => x.date > date);
+		at = next === -1 ? entries.length : next;
+	}
+	entries.splice(at, 0, e);
+	return oldDate !== date || entries.indexOf(e) !== oldIndex;
+}
+
+/** Moves an entry one place up (-1) or down (1) within its day. Returns false at the top / bottom. */
+export function stepEntry(entries: CalendarEntry[], e: CalendarEntry, dir: -1 | 1): boolean {
+	sortByDay(entries);
+	const i = entries.indexOf(e);
+	const j = i + dir;
+	if (i === -1 || j < 0 || j >= entries.length || entries[j].date !== e.date) return false;
+	[entries[i], entries[j]] = [entries[j], entries[i]];
+	return true;
 }
 
 export function isValidEntry(e: CalendarEntry): boolean {

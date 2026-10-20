@@ -6,7 +6,8 @@ The repo _is_ the installed plugin folder inside the user's vault (`.obsidian/pl
 ## Working here
 
 - Build / check: `npm run build` (tsc + esbuild). It writes `main.js` in place, i.e. straight into the live plugin.
-  There is no test suite; a clean build is the check. Obsidian itself can't be driven from here.
+  No unit tests; for UI there is a browser test (`npm run ui-test`, see below). Obsidian itself can't be driven
+  from here: its inspector is disabled, and injecting test code into the running plugin is blocked.
 - The plugin reloads itself when `main.js` / `styles.css` / `manifest.json` change on disk (`checkForUpdate` in
   `main.ts`), so a build — or a new version arriving through sync — takes effect without toggling the plugin.
 - The user writes in Hebrew; answer in Hebrew. All UI text in the plugin stays English. Original spec: `prompt.md`.
@@ -14,6 +15,33 @@ The repo _is_ the installed plugin folder inside the user's vault (`.obsidian/pl
   `ארכיון/Tasksgift/`). Notes written by this device have ns-precision mtimes; files written by LiveSync have
   ms-rounded mtimes — useful to tell who wrote what. Use `PYTHONIOENCODING=utf-8` when printing Hebrew from Python,
   and put longer Python scripts in a file rather than an inline heredoc (backticks/quotes break the Bash tool).
+
+## UI changes (learned the hard way)
+
+A clean build only proves the code compiles. The day-topic letter coloring failed in Obsidian four times in a row
+while it compiled — and each time the fix targeted a guessed cause (selection lost on click, events swallowed,
+contenteditable) instead of the real one: a method named `selection()` in the modal was overwritten by Obsidian's
+`Modal` instance field `this.selection`, so every call threw `this.selection is not a function`.
+
+- **Find the error before redesigning.** "Does nothing", "colors everything", "preview doesn't update" or a modal
+  that renders only half are typical of a thrown exception. Ask the user for the red error in Obsidian's console
+  (Ctrl+Shift+I → Console) — one screenshot would have saved three rounds. Don't rewrite working parts on a guess.
+- **Don't name members of `Modal` subclasses like Obsidian's own instance fields** (missing from `obsidian.d.ts`, so
+  tsc doesn't warn): `selection`, `win`, `scope`, `isOpen`, `headerEl`, `bgEl`, `titleEl`, `dimBackground`,
+  `bgOpacity`, `shouldRestoreSelection`, `shouldAnimateOpen`, `hasInitialInputFocus`, `onWindowClose`. Other Obsidian
+  classes (ItemView, Setting, Menu…) have undeclared fields too — pick specific names (`selectedRange`, not `selection`).
+- **Browser test:** `npm run ui-test` runs `dev/ui-test/day-title.test.mjs` — the modal module bundled with an
+  `obsidian` shim (`dev/ui-test/obsidian-shim.js`) and the plugin's `styles.css`, opened in headless Chrome, driven
+  with real mouse/keyboard input over the DevTools protocol (`dev/ui-test/harness.mjs`). For a new UI piece add a
+  `*.page.js` (opens it) and a `*.test.mjs` (drives and checks it). It catches thrown errors and DOM/selection
+  behavior, not Obsidian's own scripts or theme; keep the shim's Modal fields in step with the real ones (the list
+  above), otherwise clashes stay hidden. Obsidian's code can be read from `%APPDATA%/obsidian/obsidian-*.asar`
+  (plain asar archive; `app.js`, `app.css`) to check what a class really does.
+- Obsidian's / themes' `button` styles beat the plugin's CSS: use a `div role="button"` when an element needs its
+  own colors or background.
+- To confirm the user ran the new build: the data note shows what was saved and when (`updated`), compare with the
+  `main.js` mtime.
+- Say plainly in the answer what was tested where (browser test vs. not tried in Obsidian) and what to check.
 
 ## Storage and cross-device sync (learned the hard way)
 
@@ -52,6 +80,10 @@ not in the settings note (otherwise two devices write the settings note at once 
   its order.
 - Extra calendars (e.g. shifts) never touch Google: one note each in `Calendars/` next to the data note, written in
   the same text format the import parses (`src/calendars/format.ts`), so they sync per file and can be edited by hand.
+- Within a day, extra-calendar entries keep the order of their note (`sortByDay` sorts by date only); dragging an
+  entry or "Move up/down" in its context menu rewrites that order. New entries are placed by time (`insertEntry`).
+- The day's topic in the view header is per date in the data note's store (`dayTitles`), merged across devices by
+  `updated` (newest wins); a cleared one is kept with empty text so the clearing syncs.
 - Description templates of calendar entries are notes too, in `Templates/` next to the data note
   (`src/calendars/templates.ts`), read only when the Templates menu opens. Lines ending with ":" and `___` are
   fields; a template with fields opens a fill-in form before it's inserted.

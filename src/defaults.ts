@@ -95,6 +95,7 @@ export function emptyStore(): StoreData {
 		taskModes: {},
 		spawned: {},
 		aliases: {},
+		dayTitles: {},
 		lastSyncAt: null,
 		lastFullSyncAt: null,
 		gift: emptyGiftState(),
