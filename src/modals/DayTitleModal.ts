@@ -74,18 +74,20 @@ export function renderDayTitle(el: HTMLElement, t: DayTitleFields, placeholder =
 /**
  * Draws the heading's end date with its words into `el`, or hides `el` when the heading has none to show.
  * Its direction follows the words: Hebrew reads right to left with the date on the left, English the other way.
- * Where it sits next to the heading (`is-below`, `is-left`…) is up to the group's CSS.
+ * `group` holds the heading and `el`; it stacks them when the end date goes below or above.
  */
-export function renderDayTitleEnd(el: HTMLElement, t: DayTitleFields): void {
+export function renderDayTitleEnd(group: HTMLElement, el: HTMLElement, t: DayTitleFields): void {
 	const note = t.endNote;
 	const until = t.until;
+	const position = note?.position ?? "below";
 	if (!t.text || typeof until !== "string" || !note?.shown) {
 		el.empty();
-		el.style.display = "none";
+		el.className = "tg-day-title-end is-hidden";
+		group.removeClass("is-stacked");
 		return;
 	}
-	el.style.display = "";
-	applyStyle(el, `tg-day-title tg-day-title-end is-${note.position ?? "below"}`, note);
+	applyStyle(el, `tg-day-title tg-day-title-end is-${position}`, note);
+	group.toggleClass("is-stacked", position === "below" || position === "above");
 	const lead = note.text.length - note.text.trimStart().length;
 	const words = note.text.trim();
 	el.setAttribute("dir", HEBREW.test(words) ? "rtl" : "ltr");
@@ -302,7 +304,7 @@ export class DayTitleModal extends Modal {
 		const previewEnd = group.createDiv();
 		const redraw = (this.redraw = () => {
 			renderDayTitle(previewText, this.draft, "What is today about?");
-			renderDayTitleEnd(previewEnd, this.draft);
+			renderDayTitleEnd(group, previewEnd, this.draft);
 		});
 		redraw();
 
@@ -325,9 +327,9 @@ export class DayTitleModal extends Modal {
 		const end: DayTitleEnd = this.draft.until === null ? "never" : this.draft.until ? "date" : "day";
 		const note = this.note;
 		const showUntil = (e: DayTitleEnd) => {
-			until.style.display = e === "date" ? "" : "none";
-			showNote.settingEl.style.display = e === "date" ? "" : "none";
-			noteBox.style.display = e === "date" && note.shown ? "" : "none";
+			until.toggleClass("tg-day-title-off", e !== "date");
+			showNote.settingEl.toggleClass("tg-day-title-off", e !== "date");
+			noteBox.toggleClass("tg-day-title-off", e !== "date" || !note.shown);
 		};
 		const readEnd = (e: DayTitleEnd) => {
 			this.draft.until = e === "never" ? null : e === "date" && until.value ? until.value : undefined;

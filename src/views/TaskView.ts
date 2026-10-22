@@ -310,7 +310,7 @@ export class TaskView extends ItemView {
 		renderDayTitle(btn, current ?? { ...DEFAULT_DAY_TITLE, text: "" }, "+ Today's topic");
 		if (current) {
 			const end = group.createDiv();
-			renderDayTitleEnd(end, current);
+			renderDayTitleEnd(group, end, current);
 			end.addEventListener("click", () => btn.click());
 		}
 		btn.addEventListener("keydown", (e) => {

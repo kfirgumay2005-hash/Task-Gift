@@ -43,12 +43,12 @@ try {
 
 	// The "Ends" dropdown is the second select; the date field shows only for "On a date".
 	const setEnd = (v) => page.ev(`(()=>{const s=document.querySelectorAll('.modal-content select')[1];s.value='${v}';s.dispatchEvent(new Event('change'))})()`);
-	const untilShown = () => page.ev(`document.querySelector('.tg-day-title-until').style.display !== 'none'`);
+	const untilShown = () => page.ev(`getComputedStyle(document.querySelector('.tg-day-title-until')).display !== 'none'`);
 	check("end date hidden by default", !(await untilShown()), await untilShown());
 	await setEnd("date");
 	check("end date shown for 'On a date'", await untilShown(), await untilShown());
 	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until');i.value='2026-11-05';i.dispatchEvent(new Event('change'))})()`);
-	const endEl = () => page.ev(`(()=>{const e=document.querySelector('.tg-day-title-preview .tg-day-title-end');return e&&e.style.display!=='none'?{dir:e.getAttribute('dir'),text:e.textContent,size:e.className}:null})()`);
+	const endEl = () => page.ev(`(()=>{const e=document.querySelector('.tg-day-title-preview .tg-day-title-end');return e&&getComputedStyle(e).display!=='none'?{dir:e.getAttribute('dir'),text:e.textContent,size:e.className}:null})()`);
 	check("end date not in the preview before it's switched on", (await endEl()) === null, await endEl());
 	// "Show the end date" is the first checkbox after the Ends row (Bold, Italic, Background come before it).
 	await page.ev(`(()=>{const c=document.querySelectorAll('.modal-content input[type=checkbox]')[3];c.click()})()`);

@@ -18,6 +18,7 @@ P.empty = function () { while (this.firstChild) this.removeChild(this.firstChild
 P.appendText = function (t) { this.appendChild(document.createTextNode(t)); };
 P.setText = function (t) { this.textContent = t; };
 P.addClass = function (c) { this.classList.add(c); };
+P.removeClass = function (c) { this.classList.remove(c); };
 P.toggleClass = function (c, b) { this.classList.toggle(c, b); };
 Object.defineProperty(Node.prototype, "doc", { get() { return this.ownerDocument; } });
 Object.defineProperty(Node.prototype, "win", { get() { return this.ownerDocument.defaultView; } });

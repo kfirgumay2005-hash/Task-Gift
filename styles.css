@@ -3065,14 +3065,22 @@
 	max-width: 100%;
 }
 
-.tg-day-title-group:has(> .tg-day-title-end.is-below),
-.tg-day-title-group:has(> .tg-day-title-end.is-above) {
+.tg-day-title-group.is-stacked {
 	flex-direction: column;
 	gap: 2px;
 }
 
 .tg-day-title-end {
 	flex-shrink: 0;
+}
+
+.tg-day-title-end.is-hidden {
+	display: none;
+}
+
+/* Rows of the topic's window that don't apply to the chosen end. */
+.tg-day-title-off {
+	display: none;
 }
 
 .tg-day-title-end.is-left,
