@@ -40,6 +40,54 @@ try {
 	await page.click(ix - 50, iy);
 	await page.click(...(await page.center(".tg-color-swatch", 3)));
 	check("no selection colors the whole title", (await preview()) === "Hello world!", await preview());
+
+	// The "Ends" dropdown is the second select; the date field shows only for "On a date".
+	const setEnd = (v) => page.ev(`(()=>{const s=document.querySelectorAll('.modal-content select')[1];s.value='${v}';s.dispatchEvent(new Event('change'))})()`);
+	const untilShown = () => page.ev(`document.querySelector('.tg-day-title-until').style.display !== 'none'`);
+	check("end date hidden by default", !(await untilShown()), await untilShown());
+	await setEnd("date");
+	check("end date shown for 'On a date'", await untilShown(), await untilShown());
+	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until');i.value='2026-11-05';i.dispatchEvent(new Event('change'))})()`);
+	const endEl = () => page.ev(`(()=>{const e=document.querySelector('.tg-day-title-preview .tg-day-title-end');return e&&e.style.display!=='none'?{dir:e.getAttribute('dir'),text:e.textContent,size:e.className}:null})()`);
+	check("end date not in the preview before it's switched on", (await endEl()) === null, await endEl());
+	// "Show the end date" is the first checkbox after the Ends row (Bold, Italic, Background come before it).
+	await page.ev(`(()=>{const c=document.querySelectorAll('.modal-content input[type=checkbox]')[3];c.click()})()`);
+	await page.click(...(await page.center(".tg-day-title-end-settings input[type=text]")));
+	await page.type("עד");
+	await page.sleep(100);
+	const he = await endEl();
+	check("Hebrew words: right-to-left, date as DD/MM/YYYY", he?.dir === "rtl" && he?.text === "עד 05/11/2026", he);
+	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-end-settings input[type=text]');i.value='Ends';i.dispatchEvent(new Event('input'))})()`);
+	await page.ev(`(()=>{const s=document.querySelector('.tg-day-title-end-settings select[aria-label="End date size"]');s.value='huge';s.dispatchEvent(new Event('change'))})()`);
+	const en = await endEl();
+	check("English words: left-to-right, own size", en?.dir === "ltr" && en?.text === "Ends 05/11/2026" && en?.size.includes("is-huge"), en);
+
+	// Position: where the end date sits on screen next to the topic.
+	const place = () => page.ev(`(()=>{const a=document.querySelector('.tg-day-title-preview .tg-day-title:not(.tg-day-title-end)').getBoundingClientRect();const b=document.querySelector('.tg-day-title-preview .tg-day-title-end').getBoundingClientRect();return b.top>=a.bottom-1?'below':b.bottom<=a.top+1?'above':b.left>=a.right-1?'right':b.right<=a.left+1?'left':'overlap'})()`);
+	const setPos = (v) => page.ev(`(()=>{const s=document.querySelector('select[aria-label="End date position"]');s.value='${v}';s.dispatchEvent(new Event('change'))})()`);
+	check("end date below the topic by default", (await place()) === "below", await place());
+	for (const p of ["above", "right", "left", "below"]) {
+		await setPos(p);
+		check(`end date ${p} the topic`, (await place()) === p, await place());
+	}
+
+	// Letters of the end date's words are colored like the topic's.
+	const endInput = ".tg-day-title-end-settings input[type=text]";
+	const [ex, ey] = await page.center(endInput);
+	await page.click(ex, ey);
+	await page.ev(`(()=>{const i=document.querySelector('${endInput}');i.focus();i.setSelectionRange(0,2)})()`);
+	await page.sleep(50);
+	await page.click(...(await page.center(".tg-day-title-end-settings .tg-color-swatch", 1)));
+	const endHtml = () => page.ev(`document.querySelector('.tg-day-title-preview .tg-day-title-end .tg-day-title-text').innerHTML`);
+	check("selected letters of the words get the color", (await endHtml()).startsWith('<span data-color="red"'), await endHtml());
+	check("topic colors untouched by the end date's row", !(await preview()).includes("red"), await preview());
+	await setEnd("never");
+	check("end date hidden for 'Never'", !(await untilShown()) && (await endEl()) === null, await endEl());
+	await page.click(...(await page.center(".tg-modal-buttons .mod-cta")));
+	await page.sleep(100);
+	const saved = await page.ev(`JSON.stringify(window.saved)`);
+	check("saves a topic that never ends", JSON.parse(saved)?.until === null && JSON.parse(saved)?.text === "Hello world!", saved);
+	check("saves the end date's letter colors and position", JSON.parse(saved)?.endNote?.parts?.[0]?.text === "En" && JSON.parse(saved)?.endNote?.position === "below", JSON.parse(saved)?.endNote);
 	check("no page errors", (await page.errors()).length === 0, await page.errors());
 } finally {
 	page.close();

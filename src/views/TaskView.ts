@@ -4,7 +4,7 @@ import { VIEW_TYPE } from "../defaults";
 import { describeFilter } from "../filters/dates";
 import { activeMode } from "../modes";
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from "../defaults";
-import { DEFAULT_DAY_TITLE, DayTitleModal, renderDayTitle } from "../modals/DayTitleModal";
+import { DEFAULT_DAY_TITLE, DayTitleModal, renderDayTitle, renderDayTitleEnd, type DayTitleFields } from "../modals/DayTitleModal";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
 import { today } from "../util/dates";
@@ -300,24 +300,38 @@ export class TaskView extends ItemView {
 	private renderDayTitle(parent: HTMLElement): void {
 		const store = this.plugin.store;
 		const date = today();
-		const current = store.dayTitle(date);
+		const active = store.activeDayTitle(date);
+		const current = active?.title ?? null;
 		const slot = parent.createDiv({ cls: "tg-day-title-slot" });
+		// Left to right, so the end date's "left" and "right" are on screen; each text has its own direction.
+		const group = slot.createDiv({ cls: "tg-day-title-group", attr: { dir: "ltr" } });
 		// Not a <button>: Obsidian's and the themes' button styles would override the heading's color and background.
-		const btn = slot.createDiv({ attr: { role: "button", tabindex: "0", "aria-label": current ? "Edit today's topic" : "Add a topic for today" } });
+		const btn = group.createDiv({ attr: { role: "button", tabindex: "0", "aria-label": current ? "Edit today's topic" : "Add a topic for today" } });
 		renderDayTitle(btn, current ?? { ...DEFAULT_DAY_TITLE, text: "" }, "+ Today's topic");
+		if (current) {
+			const end = group.createDiv();
+			renderDayTitleEnd(end, current);
+			end.addEventListener("click", () => btn.click());
+		}
 		btn.addEventListener("keydown", (e) => {
 			if (e.key !== "Enter" && e.key !== " ") return;
 			e.preventDefault();
 			btn.click();
 		});
-		btn.addEventListener("click", () => {
+		const save = (start: string) => (t: DayTitleFields) => {
+			store.setDayTitle(start, t);
+			this.plugin.touch();
+		};
+		// A new topic starts with the last heading's style, not its text, letter colors or end.
+		const fresh = () => {
 			const last = store.lastDayTitle();
-			// A new day starts with the last heading's style, not its text or letter colors.
-			const start = current ?? { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined };
-			new DayTitleModal(this.app, date, start, (t) => {
-				store.setDayTitle(date, t);
-				this.plugin.touch();
-			}).open();
+			new DayTitleModal(this.app, date, { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined }, save(date)).open();
+		};
+		btn.addEventListener("click", () => {
+			if (!active) return fresh();
+			// A topic that lasts from an earlier day is edited where it was written.
+			const earlier = active.start !== date;
+			new DayTitleModal(this.app, active.start, active.title, save(active.start), earlier ? fresh : undefined).open();
 		});
 	}
 

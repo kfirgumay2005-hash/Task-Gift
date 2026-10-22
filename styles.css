@@ -3056,6 +3056,34 @@
 	max-width: 100%;
 }
 
+.tg-day-title-group {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.tg-day-title-group:has(> .tg-day-title-end.is-below),
+.tg-day-title-group:has(> .tg-day-title-end.is-above) {
+	flex-direction: column;
+	gap: 2px;
+}
+
+.tg-day-title-end {
+	flex-shrink: 0;
+}
+
+.tg-day-title-end.is-left,
+.tg-day-title-end.is-above {
+	order: -1;
+}
+
+.tg-day-title-end .tg-day-title-text {
+	unicode-bidi: plaintext;
+}
+
 .tg-day-title-hint.is-selection {
 	color: var(--text-accent);
 }

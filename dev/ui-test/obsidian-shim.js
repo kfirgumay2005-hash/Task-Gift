@@ -58,6 +58,12 @@ export class Setting {
 		cb(d);
 		return this;
 	}
+	addText(cb) {
+		const i = this.controlEl.createEl("input", { attr: { type: "text" } });
+		const t = { inputEl: i, setPlaceholder: (p) => { i.placeholder = p; return t; }, setValue: (v) => { i.value = v; return t; }, onChange: (f) => { i.oninput = () => f(i.value); return t; } };
+		cb(t);
+		return this;
+	}
 	addToggle(cb) {
 		const i = this.controlEl.createEl("input", { attr: { type: "checkbox" } });
 		const t = { setValue: (v) => { i.checked = v; return t; }, onChange: (f) => { i.onchange = () => f(i.checked); return t; } };

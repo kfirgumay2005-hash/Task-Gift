@@ -5,6 +5,12 @@ import { addDays, today } from "../util/dates";
 /** Day headings older than this many days are dropped. */
 const KEEP_DAY_TITLES_DAYS = 60;
 
+/** Whether the heading written for `start` is still shown on `date` (on or after `start`). */
+function dayTitleLasts(start: string, t: DayTitle, date: string): boolean {
+	if (t.until === null) return true;
+	return date <= (t.until ?? start);
+}
+
 export const LOCAL_PREFIX = "local-";
 
 export function isLocalId(id: string): boolean {
@@ -97,10 +103,17 @@ export class TaskStore {
 		return this.data.recurrence[id] ?? null;
 	}
 
-	/** The day's heading, or null when it has none. */
-	dayTitle(date: string): DayTitle | null {
-		const t = this.data.dayTitles[date];
-		return t?.text ? t : null;
+	/**
+	 * The heading shown on `date` and the day it was written for: the newest one written on or before `date` that
+	 * still lasts then. Null when there is none.
+	 */
+	activeDayTitle(date: string): { start: string; title: DayTitle } | null {
+		const starts = Object.keys(this.data.dayTitles)
+			.filter((d) => d <= date && this.data.dayTitles[d].text && dayTitleLasts(d, this.data.dayTitles[d], date))
+			.sort();
+		if (!starts.length) return null;
+		const start = starts[starts.length - 1];
+		return { start, title: this.data.dayTitles[start] };
 	}
 
 	/** The style of the most recent heading, so a new day starts looking like the last one. */
@@ -113,7 +126,7 @@ export class TaskStore {
 	setDayTitle(date: string, title: Omit<DayTitle, "updated">): void {
 		this.data.dayTitles[date] = { ...title, text: title.text.trim(), updated: Date.now() };
 		const cutoff = addDays(today(), -KEEP_DAY_TITLES_DAYS);
-		for (const d of Object.keys(this.data.dayTitles)) if (d < cutoff) delete this.data.dayTitles[d];
+		for (const [d, t] of Object.entries(this.data.dayTitles)) if (d < cutoff && !dayTitleLasts(d, t, cutoff)) delete this.data.dayTitles[d];
 	}
 
 	children(id: string): Task[] {

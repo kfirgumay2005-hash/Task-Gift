@@ -83,7 +83,11 @@ not in the settings note (otherwise two devices write the settings note at once 
 - Within a day, extra-calendar entries keep the order of their note (`sortByDay` sorts by date only); dragging an
   entry or "Move up/down" in its context menu rewrites that order. New entries are placed by time (`insertEntry`).
 - The day's topic in the view header is per date in the data note's store (`dayTitles`), merged across devices by
-  `updated` (newest wins); a cleared one is kept with empty text so the clearing syncs.
+  `updated` (newest wins); a cleared one is kept with empty text so the clearing syncs. Its `until` sets how long
+  it lasts (missing = that day only, null = never ends); the header shows the newest one still lasting
+  (`store.activeDayTitle`), and a lasting topic is edited under the date it was written for. `endNote` shows the
+  end date next to it (below/above/left/right) with the user's words and its own style; Hebrew words → RTL; the date is
+  DD/MM/YYYY. Both texts use `LetterColorField` in `DayTitleModal.ts` for per-letter colors.
 - Description templates of calendar entries are notes too, in `Templates/` next to the data note
   (`src/calendars/templates.ts`), read only when the Templates menu opens. Lines ending with ":" and `___` are
   fields; a template with fields opens a fill-in form before it's inserted.

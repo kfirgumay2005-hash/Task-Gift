@@ -103,17 +103,40 @@ export interface DayTitlePart {
 	color: TaskColor | null;
 }
 
-/** The heading of a day ("what today is about"), shown in the view's header. */
-export interface DayTitle {
-	text: string;
-	/** Set when some letters have their own color; their texts joined equal `text`. */
-	parts?: DayTitlePart[];
+/** How a day heading (or its end date) looks. */
+export interface DayTitleStyle {
 	color: TaskColor | null;
 	size: DayTitleSize;
 	bold: boolean;
 	italic: boolean;
 	/** Drawn on a tinted pill. */
 	highlight: boolean;
+}
+
+/** The heading's end date shown next to it, after the user's own words (e.g. "Ends" or "עד"). */
+export interface DayTitleEndNote extends DayTitleStyle {
+	shown: boolean;
+	text: string;
+	/** Set when some letters of `text` have their own color; their texts joined equal `text`. */
+	parts?: DayTitlePart[];
+	/** Where it sits next to the heading; missing = below. */
+	position?: DayTitleEndPosition;
+}
+
+export type DayTitleEndPosition = "below" | "above" | "right" | "left";
+
+/** The heading of a day ("what today is about"), shown in the view's header. */
+export interface DayTitle extends DayTitleStyle {
+	text: string;
+	/** Set when some letters have their own color; their texts joined equal `text`. */
+	parts?: DayTitlePart[];
+	/**
+	 * The last day the heading is shown (YYYY-MM-DD); null = it never ends; missing = only the day it was written for.
+	 * A heading written on a later day takes over while it lasts.
+	 */
+	until?: string | null;
+	/** Shown only while `until` is a date. */
+	endNote?: DayTitleEndNote;
 	/** Date.now() of the last edit; the newer one wins when two devices edited the same day. */
 	updated: number;
 }
