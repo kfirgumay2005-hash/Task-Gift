@@ -27,6 +27,10 @@ export class TaskView extends ItemView {
 	private search = { open: false, query: "" };
 	private bodyEl!: HTMLElement;
 	private syncBtn!: HTMLElement;
+	/** Shown under the header while Google isn't connected, so a sign-in that expired doesn't go unnoticed. */
+	private authBannerEl: HTMLElement | null = null;
+	/** What the banner shows now, so status updates don't redraw it (and its button) for nothing. */
+	private authBannerKey = "";
 	private gift: GiftController;
 	private modesEditor: ModesEditor;
 	/** The Modes page is open (view-local, not saved). */
@@ -74,8 +78,12 @@ export class TaskView extends ItemView {
 		root.empty();
 		root.addClass("tg-view");
 		this.headerEl = root.createDiv({ cls: "tg-header" });
+		this.authBannerEl = root.createDiv({ cls: "tg-auth-banner is-hidden", attr: { role: "alert" } });
 		this.bodyEl = root.createDiv({ cls: "tg-body" });
-		this.unsubscribe = this.plugin.onStatus((s) => this.updateSyncButton(s));
+		this.unsubscribe = this.plugin.onStatus((s) => {
+			this.updateSyncButton(s);
+			this.updateAuthBanner();
+		});
 		// Pause a video background (and its sound) while this tab is hidden.
 		const syncMedia = () => this.gift.setOnScreen(this.showsGift());
 		this.registerEvent(this.app.workspace.on("active-leaf-change", syncMedia));
@@ -100,6 +108,7 @@ export class TaskView extends ItemView {
 		const caret = typing ? [active.selectionStart, active.selectionEnd] : null;
 
 		this.renderHeader(mode);
+		this.updateAuthBanner();
 		this.contentEl.toggleClass("is-gift-mode", mode === "gift");
 		this.contentEl.toggleClass("is-calendar-mode", mode === "calendar");
 		this.contentEl.toggleClass("is-modes-mode", mode === "modes");
@@ -386,6 +395,30 @@ export class TaskView extends ItemView {
 		if (connected && s.lastSync) label += ` · last sync ${new Date(s.lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 		if (s.pending) label += ` · ${s.pending} pending`;
 		this.syncBtn.setAttr("aria-label", label);
+	}
+
+	/** "Not connected to Google" with a Reconnect button, until Google is connected again. */
+	private updateAuthBanner(): void {
+		const el = this.authBannerEl;
+		if (!el) return;
+		const p = this.plugin;
+		const pending = p.engine.pendingCount();
+		const hasClient = !!(p.settings.clientId.trim() && p.settings.clientSecret.trim());
+		const key = p.isConnected() ? "" : `${pending}|${hasClient}`;
+		if (key === this.authBannerKey) return;
+		this.authBannerKey = key;
+		el.empty();
+		el.toggleClass("is-hidden", !key);
+		if (!key) return;
+		setIcon(el.createSpan({ cls: "tg-auth-banner-icon" }), "unplug");
+		const text = el.createDiv({ cls: "tg-auth-banner-text" });
+		text.createDiv({ cls: "tg-auth-banner-title", text: "Not connected to Google: tasks aren't syncing." });
+		const detail = pending ? `${pending} change${pending === 1 ? "" : "s"} made here will upload once you reconnect.` : "Changes on other devices won't show up here until you reconnect.";
+		text.createDiv({ cls: "tg-auth-banner-detail", text: detail });
+		if (hasClient) {
+			el.createEl("button", { cls: "mod-cta", text: "Reconnect" }).addEventListener("click", () => void p.connect());
+		}
+		el.createEl("button", { text: "Settings" }).addEventListener("click", () => this.openSettings());
 	}
 
 	private openSettings(): void {

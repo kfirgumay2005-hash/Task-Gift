@@ -105,6 +105,7 @@ The Google Tasks API **cannot create recurring tasks** and **stores dates only, 
 
 - **Model**: a local store (in the data note) mirrors Google. Local changes mark tasks *dirty*, which works as the offline queue. Each sync first **pulls** (incrementally via `updatedMin`, plus a full pull every 6 hours) and then **pushes**.
 - **Conflicts**: if a task changed both locally and in Google since the last sync, the newer change wins (Google's `updated` vs. your local edit time). Every conflict is logged to the developer console (`Ctrl+Shift+I`). A task deleted in Google but edited locally is **re-created**, not dropped.
+- **Signed out**: while Google isn't connected (e.g. the sign-in expired), a red strip under the view's header says so, with how many local changes are waiting and a **Reconnect** button.
 - **Offline**: changes stay queued and the plugin retries every minute until it reaches Google.
 - **Quota**: all your devices share your Google project's quota (about 50,000 requests a day). Each sync makes one request plus one per task list, so keep the interval at 15 seconds or more, and longer with several lists.
 - **Rate limits**: requests are throttled and retried with exponential backoff on 429/5xx. Pagination uses `pageToken`.

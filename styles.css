@@ -143,6 +143,41 @@
 	background: var(--text-faint);
 }
 
+/* Google isn't connected: a strip under the header until it is again. */
+.tg-auth-banner {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+	padding: 8px 14px;
+	border-bottom: 1px solid color-mix(in srgb, var(--color-red) 45%, transparent);
+	background: color-mix(in srgb, var(--color-red) 14%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.tg-auth-banner.is-hidden {
+	display: none;
+}
+
+.tg-auth-banner-icon {
+	display: flex;
+	color: var(--color-red);
+}
+
+.tg-auth-banner-text {
+	flex: 1 1 200px;
+	min-width: 0;
+}
+
+.tg-auth-banner-title {
+	font-weight: var(--font-semibold);
+}
+
+.tg-auth-banner-detail {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
 @keyframes tg-spin {
 	to {
 		transform: rotate(360deg);
