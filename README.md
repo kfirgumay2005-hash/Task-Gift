@@ -55,6 +55,7 @@ Because the sign-in is saved in the data note (see below), you only need to conn
 ### Where data is stored: the data note
 
 Settings, the Google sign-in, sync state, repeat rules and times are stored in a **markdown note in your vault**, by default `Task Gift Data.md` at the vault root. You can move it in *Settings → Task Gift → Sync → Data file location* and click **Apply**. The settings themselves are in a second note next to it, `Task Gift Settings.md`. The data note is rewritten on every sync, while the settings note only changes when you change a setting, so sync tools such as Self-hosted LiveSync deliver new settings to your other devices right away, without a reload.
+The day topics shown in the view's header have a third note of their own, `Task Gift Topics.md`, for the same reason.
 
 - It syncs with the vault (Obsidian Sync, iCloud, Git, …), so phone and desktop share one setup: connect once, and repeat rules made on one device work on the others.
 - When the note changes on another device, Task Gift merges it: settings, sign-in and gift state are taken over, and repeat rules and times are combined.
@@ -67,7 +68,7 @@ Settings, the Google sign-in, sync state, repeat rules and times are stored in a
 - **Open the view** with the gift icon in the ribbon, or the command *Task Gift: Open board*.
 - **New task**: the clipboard-plus ribbon icon, the `+` in the view header or in a column, or the command *Task Gift: New task*.
 - **Edit**: click a card. The modal also has **Delete**.
-- **Sync**: automatic on startup, every N minutes (default 5) and about 1.5 seconds after local edits. You can also use the sync button, the command *Sync now*, or *Full resync* to re-download everything.
+- **Sync**: automatic on startup, every N seconds (default 300, at least 15) and about 1.5 seconds after local edits. You can also use the sync button, the command *Sync now*, or *Full resync* to re-download everything.
 - **Search all tasks**: the 🔍 button in the view header (board and calendar) searches every task by title or description, in all lists, whatever its date, mode or status (completed tasks as far as they are kept locally). Esc or the button again closes the search.
 - **Search a column**: the 🔍 button in a column header opens a search box for that column only; it filters its cards by title or description as you type (Esc clears and closes it).
 - **Sort a column**: the sort button next to it orders that column's cards by date, oldest or newest first (completion date for completed tasks, due date otherwise), or back to the default order. Each column remembers its own order.
@@ -105,6 +106,7 @@ The Google Tasks API **cannot create recurring tasks** and **stores dates only, 
 - **Model**: a local store (in the data note) mirrors Google. Local changes mark tasks *dirty*, which works as the offline queue. Each sync first **pulls** (incrementally via `updatedMin`, plus a full pull every 6 hours) and then **pushes**.
 - **Conflicts**: if a task changed both locally and in Google since the last sync, the newer change wins (Google's `updated` vs. your local edit time). Every conflict is logged to the developer console (`Ctrl+Shift+I`). A task deleted in Google but edited locally is **re-created**, not dropped.
 - **Offline**: changes stay queued and the plugin retries every minute until it reaches Google.
+- **Quota**: all your devices share your Google project's quota (about 50,000 requests a day). Each sync makes one request plus one per task list, so keep the interval at 15 seconds or more, and longer with several lists.
 - **Rate limits**: requests are throttled and retried with exponential backoff on 429/5xx. Pagination uses `pageToken`.
 - **Completed tasks** older than *Keep completed tasks for (days)* (default 30) are dropped locally but stay in Google.
 - Moving a task between lists uses the API's `move` with `destinationTasklist`. If Google refuses, the task is copied to the new list and deleted from the old one.

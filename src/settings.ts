@@ -1,7 +1,7 @@
 import { App, Platform, PluginSettingTab, SettingDefinitionItem, SettingGroupItem, TFolder } from "obsidian";
 import type TaskGiftPlugin from "./main";
 import type { Grouping, TaskColorScope } from "./types";
-import { KEEP_COMPLETED_OPTIONS, KEEP_FOREVER } from "./defaults";
+import { KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS } from "./defaults";
 import { isDailyNotesEnabled, todayNotePath } from "./dailyNote";
 import { SETTINGS_FILE_NAME } from "./storage/dataFile";
 
@@ -32,8 +32,9 @@ export class TaskGiftSettingTab extends PluginSettingTab {
 			case "clientSecret":
 				s[key] = String(value).trim();
 				break;
-			case "syncIntervalMinutes":
-				s.syncIntervalMinutes = Math.max(1, Math.round(Number(value)) || 5);
+			case "syncIntervalSeconds":
+				s.syncIntervalSeconds = Math.max(MIN_SYNC_SECONDS, Math.round(Number(value)) || 300);
+				s.syncIntervalMinutes = Math.max(1, Math.round(s.syncIntervalSeconds / 60));
 				p.restartInterval();
 				break;
 			case "keepCompletedDays":
@@ -194,14 +195,14 @@ export class TaskGiftSettingTab extends PluginSettingTab {
 				},
 			},
 			{
-				name: "Sync interval (minutes)",
-				desc: "Also syncs on startup and shortly after local edits.",
+				name: "Sync interval (seconds)",
+				desc: `Also syncs on startup and shortly after local edits. At least ${MIN_SYNC_SECONDS} seconds: every device uses the same Google quota (about 50,000 requests a day).`,
 				control: {
 					type: "number",
-					key: "syncIntervalMinutes",
-					min: 1,
+					key: "syncIntervalSeconds",
+					min: MIN_SYNC_SECONDS,
 					step: 1,
-					validate: (v) => (Number.isFinite(v) && v >= 1 ? undefined : "Enter at least 1 minute."),
+					validate: (v) => (Number.isFinite(v) && v >= MIN_SYNC_SECONDS ? undefined : `Enter at least ${MIN_SYNC_SECONDS} seconds.`),
 				},
 			},
 			{

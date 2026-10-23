@@ -7,7 +7,7 @@ import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from "../defaults";
 import { DEFAULT_DAY_TITLE, DayTitleModal, renderDayTitle, renderDayTitleEnd, type DayTitleFields } from "../modals/DayTitleModal";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
-import { today } from "../util/dates";
+import { nowTime, today } from "../util/dates";
 import { BoardUiState, renderBoard } from "./board";
 import { CalendarUiState, renderCalendar } from "./calendar";
 import { GiftController } from "./gift";
@@ -300,7 +300,7 @@ export class TaskView extends ItemView {
 	private renderDayTitle(parent: HTMLElement): void {
 		const store = this.plugin.store;
 		const date = today();
-		const active = store.activeDayTitle(date);
+		const active = store.activeDayTitle(date, nowTime());
 		const current = active?.title ?? null;
 		const slot = parent.createDiv({ cls: "tg-day-title-slot" });
 		// Left to right, so the end date's "left" and "right" are on screen; each text has its own direction.
@@ -325,7 +325,7 @@ export class TaskView extends ItemView {
 		// A new topic starts with the last heading's style, not its text, letter colors or end.
 		const fresh = () => {
 			const last = store.lastDayTitle();
-			new DayTitleModal(this.app, date, { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined }, save(date)).open();
+			new DayTitleModal(this.app, date, { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined, untilTime: undefined }, save(date)).open();
 		};
 		btn.addEventListener("click", () => {
 			if (!active) return fresh();

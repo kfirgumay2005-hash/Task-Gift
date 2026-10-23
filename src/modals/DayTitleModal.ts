@@ -26,10 +26,10 @@ interface ColoredText {
 	color: TaskColor | null;
 }
 
-/** The end date as DD/MM/YYYY ("2026-11-05" → "05/11/2026"), the same after Hebrew or English words. */
-function endDateText(date: string): string {
+/** The end date as DD/MM/YYYY ("2026-11-05" → "05/11/2026"), with its time if any; the same after Hebrew or English words. */
+function endDateText(date: string, time?: string): string {
 	const [y, m, d] = date.split("-");
-	return `${d}/${m}/${y}`;
+	return time ? `${d}/${m}/${y} ${time}` : `${d}/${m}/${y}`;
 }
 
 /** Gives `el` the pill classes of a heading style. */
@@ -96,7 +96,7 @@ export function renderDayTitleEnd(group: HTMLElement, el: HTMLElement, t: DayTit
 		renderParts(text, trimRuns(partsOf(note), lead, words.length));
 		text.appendText(" ");
 	}
-	text.appendText(endDateText(until));
+	text.appendText(endDateText(until, t.untilTime));
 }
 
 /**
@@ -321,18 +321,25 @@ export class DayTitleModal extends Modal {
 		this.styleRows(contentEl, this.draft);
 
 		// Until when the header shows it. A date before the start counts as "at the end of the day" when saved.
-		const ends = new Setting(contentEl).setName("Ends").setDesc("After that the header shows no topic (or an earlier one that still lasts).");
+		const ends = new Setting(contentEl)
+			.setName("Ends")
+			.setDesc("After that the header shows no topic (or an earlier one that still lasts). Without a time it ends at the end of that day.");
 		const until = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until", attr: { type: "date", min: this.date, "aria-label": "Last day" } });
 		until.value = typeof this.draft.until === "string" ? this.draft.until : addDays(this.date, 7);
+		// Empty = at the end of that day.
+		const untilTime = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until-time", attr: { type: "time", "aria-label": "End time" } });
+		untilTime.value = this.draft.untilTime ?? "";
 		const end: DayTitleEnd = this.draft.until === null ? "never" : this.draft.until ? "date" : "day";
 		const note = this.note;
 		const showUntil = (e: DayTitleEnd) => {
 			until.toggleClass("tg-day-title-off", e !== "date");
+			untilTime.toggleClass("tg-day-title-off", e !== "date");
 			showNote.settingEl.toggleClass("tg-day-title-off", e !== "date");
 			noteBox.toggleClass("tg-day-title-off", e !== "date" || !note.shown);
 		};
 		const readEnd = (e: DayTitleEnd) => {
 			this.draft.until = e === "never" ? null : e === "date" && until.value ? until.value : undefined;
+			this.draft.untilTime = typeof this.draft.until === "string" && untilTime.value ? untilTime.value : undefined;
 			showUntil(e);
 			redraw();
 		};
@@ -371,7 +378,9 @@ export class DayTitleModal extends Modal {
 			d.setValue(end).onChange((v) => readEnd((endChoice = v as DayTitleEnd)));
 		});
 		ends.controlEl.appendChild(until);
+		ends.controlEl.appendChild(untilTime);
 		until.addEventListener("change", () => readEnd(endChoice));
+		untilTime.addEventListener("change", () => readEnd(endChoice));
 		showUntil(end);
 		redraw();
 
@@ -413,8 +422,11 @@ export class DayTitleModal extends Modal {
 
 	private save(clear = false): void {
 		const title = clear ? { text: "", parts: undefined } : this.titleField.trimmed();
-		const until = typeof this.draft.until === "string" && this.draft.until <= this.date ? undefined : this.draft.until;
-		this.onSave({ ...this.draft, ...title, until, endNote: { ...this.note, ...this.noteField.trimmed() } });
+		// An end before the start, or at the end of the start day itself, is the same as "At the end of the day".
+		const d = this.draft.until;
+		const until = typeof d === "string" && (d < this.date || (d === this.date && !this.draft.untilTime)) ? undefined : d;
+		const untilTime = typeof until === "string" ? this.draft.untilTime : undefined;
+		this.onSave({ ...this.draft, ...title, until, untilTime, endNote: { ...this.note, ...this.noteField.trimmed() } });
 		this.close();
 	}
 

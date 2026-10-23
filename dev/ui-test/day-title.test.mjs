@@ -61,6 +61,10 @@ try {
 	await page.ev(`(()=>{const s=document.querySelector('.tg-day-title-end-settings select[aria-label="End date size"]');s.value='huge';s.dispatchEvent(new Event('change'))})()`);
 	const en = await endEl();
 	check("English words: left-to-right, own size", en?.dir === "ltr" && en?.text === "Ends 05/11/2026" && en?.size.includes("is-huge"), en);
+	const timeShown = () => page.ev(`getComputedStyle(document.querySelector('.tg-day-title-until-time')).display !== 'none'`);
+	check("end time shown for 'On a date'", await timeShown(), await timeShown());
+	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until-time');i.value='18:30';i.dispatchEvent(new Event('change'))})()`);
+	check("end time after the date", (await endEl())?.text === "Ends 05/11/2026 18:30", await endEl());
 
 	// Position: where the end date sits on screen next to the topic.
 	const place = () => page.ev(`(()=>{const a=document.querySelector('.tg-day-title-preview .tg-day-title:not(.tg-day-title-end)').getBoundingClientRect();const b=document.querySelector('.tg-day-title-preview .tg-day-title-end').getBoundingClientRect();return b.top>=a.bottom-1?'below':b.bottom<=a.top+1?'above':b.left>=a.right-1?'right':b.right<=a.left+1?'left':'overlap'})()`);
@@ -82,11 +86,11 @@ try {
 	check("selected letters of the words get the color", (await endHtml()).startsWith('<span data-color="red"'), await endHtml());
 	check("topic colors untouched by the end date's row", !(await preview()).includes("red"), await preview());
 	await setEnd("never");
-	check("end date hidden for 'Never'", !(await untilShown()) && (await endEl()) === null, await endEl());
+	check("end date hidden for 'Never'", !(await untilShown()) && !(await timeShown()) && (await endEl()) === null, await endEl());
 	await page.click(...(await page.center(".tg-modal-buttons .mod-cta")));
 	await page.sleep(100);
 	const saved = await page.ev(`JSON.stringify(window.saved)`);
-	check("saves a topic that never ends", JSON.parse(saved)?.until === null && JSON.parse(saved)?.text === "Hello world!", saved);
+	check("saves a topic that never ends", JSON.parse(saved)?.until === null && JSON.parse(saved)?.untilTime === undefined && JSON.parse(saved)?.text === "Hello world!", saved);
 	check("saves the end date's letter colors and position", JSON.parse(saved)?.endNote?.parts?.[0]?.text === "En" && JSON.parse(saved)?.endNote?.position === "below", JSON.parse(saved)?.endNote);
 	check("no page errors", (await page.errors()).length === 0, await page.errors());
 } finally {

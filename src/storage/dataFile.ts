@@ -1,9 +1,11 @@
 import { App, normalizePath, TFile } from "obsidian";
-import type { PluginData, TaskGiftSettings } from "../types";
+import type { DayTitle, PluginData, TaskGiftSettings } from "../types";
 
 export const DEFAULT_DATA_PATH = "Task Gift Data.md";
 /** The settings note sits next to the data note. */
 export const SETTINGS_FILE_NAME = "Task Gift Settings.md";
+/** The day topics sit next to the data note too. */
+export const TOPICS_FILE_NAME = "Task Gift Topics.md";
 /** How many of our own recent writes are recognized when their "modify" event arrives late. */
 const OWN_WRITES_KEPT = 10;
 const JSON_BLOCK_RE = /```json\r?\n([\s\S]*?)\r?\n```/;
@@ -35,6 +37,16 @@ export const SETTINGS_NOTE: NoteKind = {
 		"This note stores Task Gift's settings. It syncs with your vault, so every device shares the same setup, and changes apply on the other devices as soon as the note arrives. Don't edit it by hand, and don't share or publish it: it contains your Google client secret.",
 };
 
+/**
+ * The day topics only. They used to live in the data note, but that note is rewritten by every device on every
+ * sync, so a topic written on one device was often replaced by the other device's copy before it arrived.
+ */
+export const TOPICS_NOTE: NoteKind = {
+	marker: "task-gift-topics",
+	title: "Task Gift topics",
+	description: "This note stores Task Gift's day topics, so every device shows the same ones. Don't edit it by hand.",
+};
+
 /** The note's contents apart from the settings (those have their own note). */
 export type StoredData = Partial<PluginData>;
 
@@ -48,6 +60,12 @@ export function normalizeDataPath(input: string): string {
 export function settingsPathFor(dataPath: string): string {
 	const slash = dataPath.lastIndexOf("/");
 	return slash === -1 ? SETTINGS_FILE_NAME : `${dataPath.slice(0, slash)}/${SETTINGS_FILE_NAME}`;
+}
+
+/** Path of the topics note that belongs to a data note. */
+export function topicsPathFor(dataPath: string): string {
+	const slash = dataPath.lastIndexOf("/");
+	return slash === -1 ? TOPICS_FILE_NAME : `${dataPath.slice(0, slash)}/${TOPICS_FILE_NAME}`;
 }
 
 export function serialize(kind: NoteKind, data: unknown): string {
@@ -199,3 +217,15 @@ export class DataFile<T> {
 
 /** Settings note contents. */
 export type StoredSettings = Partial<TaskGiftSettings>;
+
+/** Topics note contents. */
+export interface StoredTopics {
+	dayTitles: Record<string, DayTitle>;
+}
+
+/** The topics in date order, so the same topics always give the same note text. */
+export function topicsData(dayTitles: Record<string, DayTitle>): StoredTopics {
+	const sorted: Record<string, DayTitle> = {};
+	for (const d of Object.keys(dayTitles).sort()) sorted[d] = dayTitles[d];
+	return { dayTitles: sorted };
+}

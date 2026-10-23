@@ -52,6 +52,13 @@ The user syncs the vault with **Self-hosted LiveSync** on two computers. What wo
    - `Task Gift Data.md`: tasks, sync state, sign-in. Rewritten on every sync. Still carries a copy of the
      settings for older plugin versions, but that copy is **ignored** when the data note arrives from another device.
      Keeping fast-changing state and settings in one big note made both devices overwrite each other constantly.
+   - `Task Gift Topics.md`: the day topics (`dayTitles`) only, written only when a topic changes. In the data note
+     they were lost: the other device rewrote it on its next sync before the topic arrived. Merged per date by
+     `updated` (`store.mergeDayTitles`); a device holding a topic the note lacks writes it back, so both settle.
+     The data note keeps a copy for older versions and is merged the same way.
+   - The Google sync interval is in seconds (`syncIntervalSeconds`, min `MIN_SYNC_SECONDS`; `syncIntervalMinutes`
+     is kept for older versions). A sync that only moved `lastSyncAt` doesn't rewrite the data note (at most every
+     `SYNC_STAMP_WRITE_MS`), so frequent syncs don't keep LiveSync busy.
 2. **Don't rely on the vault `modify` event.** LiveSync sometimes writes straight to disk. `checkFiles()` polls
    mtime+size every 2 s and on window focus; `DataFile.readChanged()` only reads when the stamp changed and never
    hands out the same contents twice.
@@ -84,7 +91,7 @@ not in the settings note (otherwise two devices write the settings note at once 
   entry or "Move up/down" in its context menu rewrites that order. New entries are placed by time (`insertEntry`).
 - The day's topic in the view header is per date in the data note's store (`dayTitles`), merged across devices by
   `updated` (newest wins); a cleared one is kept with empty text so the clearing syncs. Its `until` sets how long
-  it lasts (missing = that day only, null = never ends); the header shows the newest one still lasting
+  it lasts (missing = that day only, null = never ends; `untilTime` HH:MM ends it at that time of the `until` day); the header shows the newest one still lasting
   (`store.activeDayTitle`), and a lasting topic is edited under the date it was written for. `endNote` shows the
   end date next to it (below/above/left/right) with the user's words and its own style; Hebrew words → RTL; the date is
   DD/MM/YYYY. Both texts use `LetterColorField` in `DayTitleModal.ts` for per-letter colors.

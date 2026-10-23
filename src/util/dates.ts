@@ -22,6 +22,12 @@ export function today(): string {
 	return toDateString(new Date());
 }
 
+/** The time now as HH:MM. */
+export function nowTime(): string {
+	const d = new Date();
+	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 export function addDays(s: string, n: number): string {
 	const d = parseDate(s);
 	d.setDate(d.getDate() + n);

@@ -2,7 +2,7 @@ import { debounce, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf
 import { TasksApi } from "./api/client";
 import { GiftMusic } from "./audio/music";
 import { AuthError, refresh, revoke } from "./auth/oauth";
-import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, VIEW_TYPE } from "./defaults";
+import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS, VIEW_TYPE } from "./defaults";
 import { ConfirmModal } from "./modals/ConfirmModal";
 import { ConnectModal } from "./modals/ConnectModal";
 import { LoginModal } from "./modals/LoginModal";
@@ -16,8 +16,21 @@ import { ChangeSource, TaskStore } from "./sync/store";
 import { activeMode, normalizeModes } from "./modes";
 import { normalizeDayColumns, pruneDayColumns } from "./dayColumns";
 import { appendToNote, hasHeading, isDailyNotesEnabled, tasksMarkdown, todayNote, todayNotePath } from "./dailyNote";
-import { today } from "./util/dates";
-import { DATA_NOTE, DataFile, DEFAULT_DATA_PATH, normalizeDataPath, SETTINGS_NOTE, settingsPathFor, StoredData, StoredSettings } from "./storage/dataFile";
+import { nowTime, today } from "./util/dates";
+import {
+	DATA_NOTE,
+	DataFile,
+	DEFAULT_DATA_PATH,
+	normalizeDataPath,
+	SETTINGS_NOTE,
+	settingsPathFor,
+	StoredData,
+	StoredSettings,
+	StoredTopics,
+	topicsData,
+	TOPICS_NOTE,
+	topicsPathFor,
+} from "./storage/dataFile";
 import type { AuthData, BoardView, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
 
 /** The only thing kept in the device-local data.json. */
@@ -35,6 +48,8 @@ const DAILY_NOTE_CREATE_DELAY_MS = 2000;
  * tool. Only their mtime and size are read, unless they changed.
  */
 const FILE_CHECK_MS = 2000;
+/** How long a sync that changed nothing else may leave the data note's lastSyncAt behind. */
+const SYNC_STAMP_WRITE_MS = 10 * 60 * 1000;
 /** The plugin's files whose change (an update arriving through sync) reloads the plugin. */
 const CODE_FILES = ["main.js", "styles.css", "manifest.json"];
 
@@ -50,6 +65,11 @@ export default class TaskGiftPlugin extends Plugin {
 	templates!: TemplateStore;
 	private dataFile!: DataFile<StoredData>;
 	private settingsFile!: DataFile<StoredSettings>;
+	private topicsFile!: DataFile<StoredTopics>;
+	/** Topics read from their note at startup, merged into the store once it exists. */
+	private loadedTopics: StoredTopics | null = null;
+	/** The topic the views last showed, to re-draw when it ends at a time of day. */
+	private shownTopic = "";
 	private settingTab!: TaskGiftSettingTab;
 	private music!: GiftMusic;
 
@@ -75,6 +95,8 @@ export default class TaskGiftPlugin extends Plugin {
 		await this.loadPluginData();
 
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
+		if (this.loadedTopics) this.store.mergeDayTitles(this.loadedTopics.dayTitles);
+		this.shownTopic = this.topicKey();
 		this.api = new TasksApi(() => this.accessToken());
 		this.engine = new SyncEngine(this.api, this.store, () => this.settings, () => this.auth !== null, {
 			afterSync: () => this.persist(),
@@ -159,6 +181,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private onVaultFileChanged(file: TFile): void {
 		if (this.dataFile.isDataFile(file)) void this.onDataFileChanged(true);
 		else if (this.settingsFile.isDataFile(file)) void this.onSettingsFileChanged(true);
+		else if (this.topicsFile.isDataFile(file)) void this.onTopicsFileChanged(true);
 		else if (this.calendars.isCalendarPath(file.path)) void this.calendars.refresh();
 	}
 
@@ -169,6 +192,7 @@ export default class TaskGiftPlugin extends Plugin {
 		try {
 			await this.onSettingsFileChanged(false);
 			await this.onDataFileChanged(false);
+			await this.onTopicsFileChanged(false);
 			await this.calendars.refresh();
 			await this.checkForUpdate();
 		} catch (e) {
@@ -212,6 +236,12 @@ export default class TaskGiftPlugin extends Plugin {
 	/** Once a minute: at a new day, drop finished day columns and re-draw. */
 	private onMinute(): void {
 		const day = today();
+		const topic = this.topicKey();
+		// A topic can end at a time of day.
+		if (topic !== this.shownTopic) {
+			this.shownTopic = topic;
+			if (day === this.renderedDay) this.refreshViews();
+		}
 		if (day === this.renderedDay) return;
 		this.renderedDay = day;
 		if (pruneDayColumns(this.settings)) void this.persist();
@@ -227,6 +257,8 @@ export default class TaskGiftPlugin extends Plugin {
 	// ------------------------------------------------------------ data
 
 	private loadedStore = emptyStore();
+	/** lastSyncAt as last written to the data note. */
+	private writtenSyncAt: string | null = null;
 	/** True when no data note existed at startup (it is created once the vault is ready). */
 	private dataFileMissing = false;
 	/** Writes are held back until the vault is ready and the data note location is settled. */
@@ -236,6 +268,9 @@ export default class TaskGiftPlugin extends Plugin {
 		const s = Object.assign({}, DEFAULT_SETTINGS, raw ?? {});
 		// Also turns the filter and sound settings of older versions into mode settings.
 		normalizeModes(s);
+		// The interval used to be set in minutes.
+		if (!Number.isFinite(raw?.syncIntervalSeconds)) s.syncIntervalSeconds = Math.max(1, Number(raw?.syncIntervalMinutes) || 5) * 60;
+		s.syncIntervalSeconds = Math.max(MIN_SYNC_SECONDS, Math.round(s.syncIntervalSeconds));
 		if (!Number.isFinite(s.boardZoom)) s.boardZoom = DEFAULT_SETTINGS.boardZoom;
 		if (s.boardView !== "board" && s.boardView !== "calendar") s.boardView = DEFAULT_SETTINGS.boardView;
 		if (s.calendarRange !== "month" && s.calendarRange !== "week") s.calendarRange = DEFAULT_SETTINGS.calendarRange;
@@ -278,6 +313,7 @@ export default class TaskGiftPlugin extends Plugin {
 		const dataPath = normalizeDataPath(local.dataFilePath ?? DEFAULT_DATA_PATH);
 		this.dataFile = new DataFile(this.app, DATA_NOTE, dataPath);
 		this.settingsFile = new DataFile(this.app, SETTINGS_NOTE, settingsPathFor(dataPath));
+		this.topicsFile = new DataFile(this.app, TOPICS_NOTE, topicsPathFor(dataPath));
 
 		let data = await this.dataFile.read();
 		if (!data && (local.settings || local.store)) {
@@ -293,6 +329,16 @@ export default class TaskGiftPlugin extends Plugin {
 		if (noteSettings) this.settingsFile.adopt(this.settings);
 		this.auth = data?.auth ?? null;
 		this.loadedStore = TaskGiftPlugin.mergeStore(data?.store);
+		this.writtenSyncAt = this.loadedStore.lastSyncAt;
+		this.loadedTopics = await this.readTopics();
+	}
+
+	/** Reads the topics note; what it holds counts as written, so only a real change writes it again. */
+	private async readTopics(): Promise<StoredTopics | null> {
+		const topics = await this.topicsFile.read();
+		if (!topics?.dayTitles || typeof topics.dayTitles !== "object") return null;
+		this.topicsFile.adopt(topicsData(topics.dayTitles));
+		return topics;
 	}
 
 	/** Called on layout ready: adopt a data note found elsewhere, or create the default one. */
@@ -302,10 +348,13 @@ export default class TaskGiftPlugin extends Plugin {
 			if (found) {
 				this.dataFile.path = found;
 				this.settingsFile.path = settingsPathFor(found);
+				this.topicsFile.path = topicsPathFor(found);
 				const data = await this.dataFile.read();
 				const settings = await this.settingsFile.read();
 				if (data || settings) this.applyExternal({ ...data, ...(settings ? { settings } : {}) }, true);
 				if (settings) this.settingsFile.adopt(this.settings);
+				const topics = await this.readTopics();
+				if (topics) this.store.mergeDayTitles(topics.dayTitles);
 			}
 			await this.savePointer();
 		}
@@ -322,9 +371,17 @@ export default class TaskGiftPlugin extends Plugin {
 		if (!this.store || !this.dataReady) return;
 		// Each note is only rewritten when its own contents changed.
 		await this.settingsFile.write(this.settings);
+		await this.topicsFile.write(topicsData(this.store.data.dayTitles));
+		// A sync that found nothing new only moves lastSyncAt. With syncs seconds apart, writing the data note for that
+		// would keep the sync tool busy and clash with the other device's writes, so it is only written now and then.
+		// An older lastSyncAt on disk only makes the next start fetch a little more.
+		let lastSyncAt = this.store.data.lastSyncAt;
+		const written = this.writtenSyncAt;
+		if (written && lastSyncAt && Date.parse(lastSyncAt) - Date.parse(written) < SYNC_STAMP_WRITE_MS) lastSyncAt = written;
 		// The settings stay in the data note too, for devices still on an older Task Gift version.
-		const data: PluginData = { settings: this.settings, auth: this.auth, store: this.store.data };
+		const data: PluginData = { settings: this.settings, auth: this.auth, store: { ...this.store.data, lastSyncAt } };
 		await this.dataFile.write(data);
+		this.writtenSyncAt = lastSyncAt;
 	}
 
 	dataFilePath(): string {
@@ -360,12 +417,18 @@ export default class TaskGiftPlugin extends Plugin {
 			const settings = await this.settingsFile.read(settingsTarget);
 			this.dataFile.path = target;
 			this.settingsFile.path = settingsTarget;
+			this.topicsFile.path = topicsPathFor(target);
 			this.applyExternal({ ...existing, ...(settings ? { settings } : {}) }, true);
+			const topics = await this.readTopics();
+			if (topics) this.store.mergeDayTitles(topics.dayTitles);
 		} else {
 			try {
 				await this.dataFile.moveTo(target);
 				if (await this.settingsFile.exists(settingsTarget)) this.settingsFile.path = settingsTarget;
 				else await this.settingsFile.moveTo(settingsTarget);
+				const topicsTarget = topicsPathFor(target);
+				if (await this.topicsFile.exists(topicsTarget)) this.topicsFile.path = topicsTarget;
+				else await this.topicsFile.moveTo(topicsTarget);
 			} catch (e) {
 				new Notice(`Could not move the data file: ${e instanceof Error ? e.message : String(e)}`);
 				return false;
@@ -384,9 +447,9 @@ export default class TaskGiftPlugin extends Plugin {
 	 */
 	private applyExternal(incoming: Omit<Partial<PluginData>, "settings"> & { settings?: StoredSettings }, replace: boolean): void {
 		if (incoming.settings) {
-			const prevInterval = this.settings.syncIntervalMinutes;
+			const prevInterval = this.settings.syncIntervalSeconds;
 			this.settings = TaskGiftPlugin.mergeSettings(incoming.settings);
-			if (prevInterval !== this.settings.syncIntervalMinutes && this.intervalId !== null) this.restartInterval();
+			if (prevInterval !== this.settings.syncIntervalSeconds && this.intervalId !== null) this.restartInterval();
 			// Show the new values if the settings are open on this device.
 			if (this.settingTab.containerEl.isShown()) this.settingTab.update();
 		}
@@ -397,7 +460,10 @@ export default class TaskGiftPlugin extends Plugin {
 			const inc = TaskGiftPlugin.mergeStore(incoming.store);
 			const d = this.store.data;
 			if (replace || Object.keys(d.tasks).length === 0) {
+				const topics = d.dayTitles;
 				Object.assign(d, inc);
+				// The topics have their own note; keep the ones read from it.
+				if (!replace) this.store.mergeDayTitles(topics);
 			} else {
 				d.recurrence = { ...d.recurrence, ...inc.recurrence };
 				d.times = { ...d.times, ...inc.times };
@@ -405,9 +471,8 @@ export default class TaskGiftPlugin extends Plugin {
 				d.taskModes = { ...d.taskModes, ...inc.taskModes };
 				d.spawned = { ...d.spawned, ...inc.spawned };
 				d.aliases = { ...d.aliases, ...inc.aliases };
-				for (const [date, t] of Object.entries(inc.dayTitles)) {
-					if (!d.dayTitles[date] || t.updated > d.dayTitles[date].updated) d.dayTitles[date] = t;
-				}
+				// Devices on an older version still keep the topics only here.
+				this.store.mergeDayTitles(inc.dayTitles);
 				d.gift = inc.gift;
 				for (const l of Object.values(inc.lists)) if (!d.lists[l.id]) d.lists[l.id] = l;
 			}
@@ -424,6 +489,24 @@ export default class TaskGiftPlugin extends Plugin {
 		const data = this.dataFile.parse(raw);
 		if (!data) return;
 		this.applyExternal({ auth: data.auth, store: data.store }, false);
+	}
+
+	/** The topics note changed on another device: take over the newer topics, and write back any it lacks. */
+	private async onTopicsFileChanged(force: boolean): Promise<void> {
+		const raw = await this.topicsFile.readChanged(force);
+		if (raw === null || this.topicsFile.isOwnWrite(raw)) return;
+		const topics = this.topicsFile.parse(raw);
+		if (!topics?.dayTitles || typeof topics.dayTitles !== "object") return;
+		// Written again only when this device holds a topic the note lacks (or a newer one), so the devices settle.
+		this.topicsFile.adopt(topicsData(topics.dayTitles));
+		if (this.store.mergeDayTitles(topics.dayTitles)) this.refreshViews();
+		this.saveSoon();
+	}
+
+	/** Which topic shows right now; changes when one ends at a time of day. */
+	private topicKey(): string {
+		const active = this.store.activeDayTitle(today(), nowTime());
+		return active ? `${active.start}|${active.title.updated}` : "";
 	}
 
 	/** The settings note changed on another device: apply the settings right away. */
@@ -476,7 +559,11 @@ export default class TaskGiftPlugin extends Plugin {
 					if (e instanceof AuthError && e.revoked) {
 						this.auth = null;
 						await this.persist();
-						throw new AuthError("Google access was revoked or expired. Please reconnect in Task Gift settings.", true);
+						// A Google Cloud app left in "Testing" gets refresh tokens that expire after 7 days.
+						throw new AuthError(
+							"Google access was revoked or expired. Please reconnect in Task Gift settings. If this happens every week, publish your app in Google Cloud (OAuth consent screen → Publish app): apps in Testing are signed out after 7 days.",
+							true,
+						);
 					}
 					throw e;
 				})
@@ -586,11 +673,11 @@ export default class TaskGiftPlugin extends Plugin {
 
 	restartInterval(): void {
 		if (this.intervalId !== null) window.clearInterval(this.intervalId);
-		const minutes = Math.max(1, this.settings.syncIntervalMinutes || 5);
+		const seconds = Math.max(MIN_SYNC_SECONDS, this.settings.syncIntervalSeconds || 300);
 		this.intervalId = this.registerInterval(
 			window.setInterval(() => {
 				if (this.auth) void this.engine.sync();
-			}, minutes * 60 * 1000),
+			}, seconds * 1000),
 		);
 	}
 

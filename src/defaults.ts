@@ -48,6 +48,8 @@ export function taskColorCss(color: TaskColor): string {
 
 /** "Keep completed tasks" value meaning no time limit. */
 export const KEEP_FOREVER = -1;
+/** The shortest sync interval: all devices share one Google quota (~50,000 requests a day; 3 devices × 2 requests every 15 s ≈ 35,000). */
+export const MIN_SYNC_SECONDS = 15;
 
 /** Allowed values for "Keep completed tasks" (0 = never, KEEP_FOREVER = no limit). */
 export const KEEP_COMPLETED_OPTIONS = [0, 1, 3, 7, 30, 90, 365, KEEP_FOREVER];
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: TaskGiftSettings = {
 	clientId: "",
 	clientSecret: "",
 	syncIntervalMinutes: 5,
+	syncIntervalSeconds: 300,
 	keepCompletedDays: 30,
 	giftMode: false,
 	tasksPerGift: 1,

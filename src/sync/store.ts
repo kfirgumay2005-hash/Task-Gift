@@ -6,9 +6,12 @@ import { addDays, today } from "../util/dates";
 const KEEP_DAY_TITLES_DAYS = 60;
 
 /** Whether the heading written for `start` is still shown on `date` (on or after `start`). */
-function dayTitleLasts(start: string, t: DayTitle, date: string): boolean {
+/** Whether a heading still shows on `date`; `time` (HH:MM, today only) also ends it after its `untilTime`. */
+function dayTitleLasts(start: string, t: DayTitle, date: string, time?: string): boolean {
 	if (t.until === null) return true;
-	return date <= (t.until ?? start);
+	const last = t.until ?? start;
+	if (date === last && time && typeof t.until === "string" && t.untilTime) return time < t.untilTime;
+	return date <= last;
 }
 
 export const LOCAL_PREFIX = "local-";
@@ -107,9 +110,9 @@ export class TaskStore {
 	 * The heading shown on `date` and the day it was written for: the newest one written on or before `date` that
 	 * still lasts then. Null when there is none.
 	 */
-	activeDayTitle(date: string): { start: string; title: DayTitle } | null {
+	activeDayTitle(date: string, time?: string): { start: string; title: DayTitle } | null {
 		const starts = Object.keys(this.data.dayTitles)
-			.filter((d) => d <= date && this.data.dayTitles[d].text && dayTitleLasts(d, this.data.dayTitles[d], date))
+			.filter((d) => d <= date && this.data.dayTitles[d].text && dayTitleLasts(d, this.data.dayTitles[d], date, time))
 			.sort();
 		if (!starts.length) return null;
 		const start = starts[starts.length - 1];
@@ -125,6 +128,24 @@ export class TaskStore {
 	/** Sets (or, with empty text, clears) a day's heading. Local only: it never reaches Google. */
 	setDayTitle(date: string, title: Omit<DayTitle, "updated">): void {
 		this.data.dayTitles[date] = { ...title, text: title.text.trim(), updated: Date.now() };
+		this.pruneDayTitles();
+	}
+
+	/** Takes over headings from another device, per day the newer edit wins. Returns whether anything changed. */
+	mergeDayTitles(incoming: Record<string, DayTitle>): boolean {
+		let changed = false;
+		for (const [date, t] of Object.entries(incoming)) {
+			const mine = this.data.dayTitles[date];
+			if (!t || typeof t.updated !== "number" || (mine && mine.updated >= t.updated)) continue;
+			this.data.dayTitles[date] = t;
+			changed = true;
+		}
+		// Headings this device already dropped as old would otherwise come back with every merge.
+		this.pruneDayTitles();
+		return changed;
+	}
+
+	private pruneDayTitles(): void {
 		const cutoff = addDays(today(), -KEEP_DAY_TITLES_DAYS);
 		for (const [d, t] of Object.entries(this.data.dayTitles)) if (d < cutoff && !dayTitleLasts(d, t, cutoff)) delete this.data.dayTitles[d];
 	}

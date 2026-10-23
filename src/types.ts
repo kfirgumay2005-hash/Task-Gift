@@ -135,6 +135,8 @@ export interface DayTitle extends DayTitleStyle {
 	 * A heading written on a later day takes over while it lasts.
 	 */
 	until?: string | null;
+	/** HH:MM on the `until` date when the heading ends; missing = at the end of that day. */
+	untilTime?: string;
 	/** Shown only while `until` is a date. */
 	endNote?: DayTitleEndNote;
 	/** Date.now() of the last edit; the newer one wins when two devices edited the same day. */
@@ -203,7 +205,9 @@ export interface TaskMode extends ModeAudio {
 export interface TaskGiftSettings {
 	clientId: string;
 	clientSecret: string;
+	/** Kept for devices on an older version; `syncIntervalSeconds` is what counts. */
 	syncIntervalMinutes: number;
+	syncIntervalSeconds: number;
 	keepCompletedDays: number;
 	giftMode: boolean;
 	tasksPerGift: number;
