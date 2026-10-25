@@ -82,6 +82,10 @@ not in the settings note (otherwise two devices write the settings note at once 
 - Google Tasks API has no recurrence and no due times: repeat rules, times, colors and per-task modes are stored
   locally in the store, keyed by task ID. Keep `remap` / `forget` / `maybeSpawnNext` in `sync/store.ts` in step
   when adding another per-task map.
+- Monthly repeats can be "the Nth weekday (on or) after day X" (`monthlyMode: "after"`, `afterDay`, `afterInclusive`;
+  the date may spill into the next month). Older plugin versions read such a rule as "monthly on `monthDay`".
+- The header search also lists the next `UPCOMING_REPEATS` (3) occurrences of each open repeating task, computed
+  like the calendar's ghosts (`renderCard` with `upcoming`: no checkbox/menu, clicking edits the real task).
 - Modes only affect gifts; the board always shows every task. Each mode owns its own sounds, victory and music.
 - User-entered text (titles, notes, list and mode names) gets `dir="auto"` so Hebrew mixed with numbers keeps
   its order.

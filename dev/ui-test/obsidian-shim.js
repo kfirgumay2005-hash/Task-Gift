@@ -7,6 +7,7 @@ function make(tag, o, parent) {
 	o = o || {};
 	if (o.cls) el.className = Array.isArray(o.cls) ? o.cls.join(" ") : o.cls;
 	if (o.text != null) el.textContent = o.text;
+	if (o.value != null) el.value = o.value;
 	if (o.attr) for (const [k, v] of Object.entries(o.attr)) el.setAttribute(k, v);
 	parent.appendChild(el);
 	return el;
@@ -26,6 +27,14 @@ window.activeDocument = document;
 window.activeWindow = window;
 
 export function setIcon(el) { el.textContent = "Ø"; }
+export function getIcon() { return document.createElement("span"); }
+export const Platform = { isMobile: false, isDesktop: true };
+export class Notice { constructor(msg) { (window.notices ??= []).push(msg); } }
+export class Menu {
+	addItem() { return this; }
+	addSeparator() { return this; }
+	showAtMouseEvent() {}
+}
 
 export class Modal {
 	constructor(app) {

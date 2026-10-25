@@ -16,6 +16,11 @@ export interface CardOptions {
 	menu?: boolean;
 	/** Which view the card is in, for the "Show task colors" setting. Unset = never colored. */
 	colorIn?: "board" | "calendar";
+	/**
+	 * Shows the card as an upcoming repeat of the task on this date (computed, not a task yet):
+	 * no checkbox or menu; clicking it edits the real task.
+	 */
+	upcoming?: string;
 }
 
 /** Tints an element with the task's color when the settings show colors in this view. */
@@ -98,13 +103,15 @@ export function dueLabel(plugin: TaskGiftPlugin, task: Task): string | null {
 export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Task, opts: CardOptions): HTMLElement {
 	const store = plugin.store;
 	const done = task.status === "completed";
+	const upcoming = opts.upcoming;
 	const card = parent.createDiv({ cls: "tg-card" });
+	card.toggleClass("is-ghost", !!upcoming);
 	card.dataset.taskId = task.id;
 	card.toggleClass("is-done", done);
 	if (task.parent) card.addClass("is-subtask");
 	if (opts.colorIn) applyTaskColor(card, plugin, task, opts.colorIn);
 
-	if (opts.checkbox) {
+	if (opts.checkbox && !upcoming) {
 		const cb = card.createEl("button", {
 			cls: "tg-check",
 			attr: { "aria-label": done ? "Mark as not done" : "Mark as done", role: "checkbox", "aria-checked": String(done) },
@@ -136,18 +143,23 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	}
 
 	const meta = body.createDiv({ cls: "tg-card-meta" });
-	const label = dueLabel(plugin, task);
-	if (label && task.due) {
+	const due = upcoming ?? task.due;
+	const label = dueLabel(plugin, { ...task, due });
+	if (label && due) {
 		const chip = meta.createSpan({ cls: "tg-meta" });
-		if (!done && task.due < today()) chip.addClass("is-overdue");
-		else if (task.due === today()) chip.addClass("is-today");
+		if (!done && !upcoming && due < today()) chip.addClass("is-overdue");
+		else if (due === today()) chip.addClass("is-today");
 		setIcon(chip.createSpan({ cls: "tg-meta-icon" }), "calendar");
 		chip.createSpan({ text: label });
 	}
 	const rule = store.rule(task.id);
 	if (rule) {
-		const chip = meta.createSpan({ cls: "tg-meta", attr: { "aria-label": `Repeats ${describeRule(rule)}` } });
+		const chip = meta.createSpan({
+			cls: "tg-meta",
+			attr: { "aria-label": upcoming ? `Upcoming repeat (${describeRule(rule)}). It is created when the current one is done.` : `Repeats ${describeRule(rule)}` },
+		});
 		setIcon(chip.createSpan({ cls: "tg-meta-icon" }), "repeat");
+		if (upcoming) chip.createSpan({ text: "Upcoming repeat" });
 	}
 	const kids = store.children(task.id);
 	if (kids.length) {
@@ -169,7 +181,7 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 
 	body.addEventListener("click", () => plugin.openTaskModal(task));
 
-	if (opts.menu !== false) {
+	if (opts.menu !== false && !upcoming) {
 		const moreBtn = card.createEl("button", { cls: "clickable-icon tg-card-more", attr: { "aria-label": "Task actions" } });
 		setIcon(moreBtn, "more-horizontal");
 		moreBtn.addEventListener("click", (e) => {

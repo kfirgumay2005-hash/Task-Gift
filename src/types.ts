@@ -47,12 +47,19 @@ export interface RecurrenceRule {
 	interval: number;
 	/** Weekly: which weekdays (0 = Sunday). */
 	byWeekday: Weekday[];
-	/** Monthly: on a fixed day of month, or on the Nth weekday. */
-	monthlyMode: "day" | "nth";
+	/**
+	 * Monthly: on a fixed day of month, on the Nth weekday, or on the Nth weekday after a day of the month
+	 * ("the first Monday after the 10th"; that can spill into the next month).
+	 */
+	monthlyMode: "day" | "nth" | "after";
 	monthDay: number;
-	/** 1..4, or -1 for "last". */
+	/** 1..4, or -1 for "last" (not with "after"). */
 	nth: number;
 	nthWeekday: Weekday;
+	/** "after": the day of the month (1..31, clamped to the month's length) the weekday is counted from. */
+	afterDay?: number;
+	/** "after": true = that day itself counts ("on or after"). */
+	afterInclusive?: boolean;
 	end: RecurrenceEnd;
 	/** Which occurrence the task carrying this rule is (1 = first). */
 	occurrence: number;

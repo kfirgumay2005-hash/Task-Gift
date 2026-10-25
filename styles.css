@@ -2183,6 +2183,17 @@
 	margin: 0 auto;
 }
 
+/* Upcoming repeats in the search: computed for display only, not real tasks yet. */
+.tg-card.is-ghost {
+	background: transparent;
+	border-style: dashed;
+	color: var(--text-muted);
+}
+
+.tg-card.is-ghost .tg-card-title {
+	color: var(--text-muted);
+}
+
 /* ------------------------------------------------------------- day columns */
 
 .tg-add-column {

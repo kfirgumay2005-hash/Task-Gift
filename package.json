@@ -1,13 +1,13 @@
 {
   "name": "task-gift",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Google Tasks two-way sync with a board view and a gift mode that reveals one task at a time.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit --skipLibCheck",
-    "ui-test": "node dev/ui-test/day-title.test.mjs"
+    "ui-test": "node dev/ui-test/day-title.test.mjs && node dev/ui-test/task-repeat.test.mjs"
   },
   "keywords": ["obsidian", "google-tasks"],
   "license": "MIT",

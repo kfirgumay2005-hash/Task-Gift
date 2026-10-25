@@ -47,7 +47,14 @@ try {
 	check("end date hidden by default", !(await untilShown()), await untilShown());
 	await setEnd("date");
 	check("end date shown for 'On a date'", await untilShown(), await untilShown());
-	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until');i.value='2026-11-05';i.dispatchEvent(new Event('change'))})()`);
+	// The topic was written for a past day (2026-10-21): the earliest last day is today, not that day.
+	const todayKey = await page.ev(`(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')})()`);
+	const minDay = await page.ev(`document.querySelector('.tg-day-title-until').min`);
+	check("earliest last day is today", minDay === todayKey, { minDay, todayKey });
+	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until');i.value='2026-10-22';i.dispatchEvent(new Event('change'))})()`);
+	const lifted = await page.ev(`document.querySelector('.tg-day-title-until').value`);
+	check("a typed past day is lifted to today", lifted === todayKey, lifted);
+	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until');i.value='2099-11-05';i.dispatchEvent(new Event('change'))})()`);
 	const endEl = () => page.ev(`(()=>{const e=document.querySelector('.tg-day-title-preview .tg-day-title-end');return e&&getComputedStyle(e).display!=='none'?{dir:e.getAttribute('dir'),text:e.textContent,size:e.className}:null})()`);
 	check("end date not in the preview before it's switched on", (await endEl()) === null, await endEl());
 	// "Show the end date" is the first checkbox after the Ends row (Bold, Italic, Background come before it).
@@ -56,15 +63,15 @@ try {
 	await page.type("עד");
 	await page.sleep(100);
 	const he = await endEl();
-	check("Hebrew words: right-to-left, date as DD/MM/YYYY", he?.dir === "rtl" && he?.text === "עד 05/11/2026", he);
+	check("Hebrew words: right-to-left, date as DD/MM/YYYY", he?.dir === "rtl" && he?.text === "עד 05/11/2099", he);
 	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-end-settings input[type=text]');i.value='Ends';i.dispatchEvent(new Event('input'))})()`);
 	await page.ev(`(()=>{const s=document.querySelector('.tg-day-title-end-settings select[aria-label="End date size"]');s.value='huge';s.dispatchEvent(new Event('change'))})()`);
 	const en = await endEl();
-	check("English words: left-to-right, own size", en?.dir === "ltr" && en?.text === "Ends 05/11/2026" && en?.size.includes("is-huge"), en);
+	check("English words: left-to-right, own size", en?.dir === "ltr" && en?.text === "Ends 05/11/2099" && en?.size.includes("is-huge"), en);
 	const timeShown = () => page.ev(`getComputedStyle(document.querySelector('.tg-day-title-until-time')).display !== 'none'`);
 	check("end time shown for 'On a date'", await timeShown(), await timeShown());
 	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-until-time');i.value='18:30';i.dispatchEvent(new Event('change'))})()`);
-	check("end time after the date", (await endEl())?.text === "Ends 05/11/2026 18:30", await endEl());
+	check("end time after the date", (await endEl())?.text === "Ends 05/11/2099 18:30", await endEl());
 
 	// Position: where the end date sits on screen next to the topic.
 	const place = () => page.ev(`(()=>{const a=document.querySelector('.tg-day-title-preview .tg-day-title:not(.tg-day-title-end)').getBoundingClientRect();const b=document.querySelector('.tg-day-title-preview .tg-day-title-end').getBoundingClientRect();return b.top>=a.bottom-1?'below':b.bottom<=a.top+1?'above':b.left>=a.right-1?'right':b.right<=a.left+1?'left':'overlap'})()`);

@@ -1,7 +1,7 @@
 import { App, Menu, Modal, Notice, setIcon } from "obsidian";
 import type { NamedTaskColor, RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, Task, TaskColor, Weekday } from "../types";
 import type { TaskStore } from "../sync/store";
-import { isLastWeekdayOfMonth, nthOfMonth, ruleFromPreset } from "../recurrence/rule";
+import { firstMatchOnOrAfter, isLastWeekdayOfMonth, nthOfMonth, occurrencesBetween, ruleFromPreset } from "../recurrence/rule";
 import { addDays, addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT, weekday } from "../util/dates";
 import { TASK_COLORS, taskColorCss } from "../defaults";
 import { ConfirmModal } from "./ConfirmModal";
@@ -33,7 +33,12 @@ export class TaskModal extends Modal {
 	private interval = 1;
 	private freq: RecurrenceFreq = "weekly";
 	private weekdays = new Set<Weekday>();
-	private monthlyMode: "day" | "nth" | "last" = "day";
+	private monthlyMode: "day" | "nth" | "last" | "after" = "day";
+	// "after" mode: the Nth weekday after a day of the month ("the first Monday after the 10th").
+	private afterNth = 1;
+	private afterWeekday: Weekday = 1;
+	private afterDay = 10;
+	private afterInclusive = false;
 	private endType: RecurrenceEnd["type"] = "never";
 	private endCount = 10;
 	private endDate = "";
@@ -74,7 +79,13 @@ export class TaskModal extends Modal {
 		this.interval = rule.interval;
 		this.freq = rule.freq;
 		this.weekdays = new Set(rule.byWeekday);
-		this.monthlyMode = rule.monthlyMode === "day" ? "day" : rule.nth === -1 ? "last" : "nth";
+		this.monthlyMode = rule.monthlyMode === "day" ? "day" : rule.monthlyMode === "after" ? "after" : rule.nth === -1 ? "last" : "nth";
+		if (rule.monthlyMode === "after") {
+			this.afterNth = Math.max(1, rule.nth);
+			this.afterWeekday = rule.nthWeekday;
+			this.afterDay = rule.afterDay ?? 1;
+			this.afterInclusive = !!rule.afterInclusive;
+		}
 		this.endType = rule.end.type;
 		if (rule.end.type === "count") this.endCount = rule.end.count;
 		if (rule.end.type === "until") this.endDate = rule.end.date;
@@ -150,6 +161,7 @@ export class TaskModal extends Modal {
 			}
 			this.syncWeekdaysToDate();
 			this.refreshRepeatOptions();
+			this.snapDueToAfter();
 		});
 
 		const repeatRow = this.row(form, "repeat", "Repeat");
@@ -315,7 +327,56 @@ export class TaskModal extends Modal {
 		}
 	}
 
+	private isAfterMode(): boolean {
+		return this.repeat === "custom" && this.freq === "monthly" && this.monthlyMode === "after";
+	}
+
+	/** The "after" pattern as a rule (for computing dates in the modal). */
+	private afterRule(due: string): RecurrenceRule {
+		return {
+			...ruleFromPreset("monthly", due),
+			preset: "custom",
+			interval: this.interval,
+			monthlyMode: "after",
+			nth: this.afterNth,
+			nthWeekday: this.afterWeekday,
+			afterDay: this.afterDay,
+			afterInclusive: this.afterInclusive,
+		};
+	}
+
+	/** In "after" mode, moves the due date to the first matching day on or after the date picked by hand (or today). */
+	private snapDueToAfter(): void {
+		if (!this.isAfterMode()) return;
+		const base = this.dateBase || today();
+		const due = firstMatchOnOrAfter(this.afterRule(base), base);
+		if (due !== this.due) {
+			this.due = due;
+			this.dateInput.value = due;
+			this.timeInput.disabled = false;
+			this.refreshRepeatLabels();
+		}
+		this.renderAfterPreview();
+	}
+
+	private afterPreviewEl: HTMLElement | null = null;
+
+	/** The next few dates of the "after" pattern, so the rule can be checked before saving. */
+	private renderAfterPreview(): void {
+		const el = this.afterPreviewEl;
+		if (!el || !this.due) return;
+		const dates = [this.due, ...occurrencesBetween(this.afterRule(this.due), this.due, this.due, "9999-12-31", 3)];
+		const fmt = (d: string) => parseDate(d).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+		el.setText(`Next: ${dates.map(fmt).join(" · ")}`);
+	}
+
 	private refreshRepeatOptions(): void {
+		this.refreshRepeatLabels();
+		this.renderCustom();
+	}
+
+	/** Rebuilds the repeat choices, whose labels depend on the due date ("Weekly on …"). */
+	private refreshRepeatLabels(): void {
 		const d = parseDate(this.refDate());
 		const sel = this.repeatSelect;
 		sel.empty();
@@ -329,12 +390,12 @@ export class TaskModal extends Modal {
 		];
 		for (const [v, label] of opts) sel.createEl("option", { value: v, text: label });
 		sel.value = this.repeat;
-		this.renderCustom();
 	}
 
 	private renderCustom(): void {
 		const el = this.customEl;
 		el.empty();
+		this.afterPreviewEl = null;
 		el.toggleClass("is-hidden", this.repeat !== "custom");
 		if (this.repeat !== "custom") return;
 
@@ -357,6 +418,7 @@ export class TaskModal extends Modal {
 			this.freq = unit.value as RecurrenceFreq;
 			if (this.freq === "weekly" && this.weekdays.size === 0) this.weekdays.add(weekday(this.refDate()) as Weekday);
 			this.renderCustom();
+			this.snapDueToAfter();
 		});
 
 		if (this.freq === "weekly") {
@@ -387,11 +449,25 @@ export class TaskModal extends Modal {
 			const nth = nthOfMonth(ref);
 			if (nth <= 4) sel.createEl("option", { value: "nth", text: `Monthly on the ${ordinal(nth)} ${WEEKDAY_LONG[d.getDay()]}` });
 			if (isLastWeekdayOfMonth(ref)) sel.createEl("option", { value: "last", text: `Monthly on the last ${WEEKDAY_LONG[d.getDay()]}` });
+			sel.createEl("option", { value: "after", text: "Monthly on a weekday after a day of the month…" });
 			if (this.monthlyMode === "nth" && nth > 4) this.monthlyMode = "last";
 			if (this.monthlyMode === "last" && !isLastWeekdayOfMonth(ref)) this.monthlyMode = "nth";
 			sel.value = this.monthlyMode;
-			sel.addEventListener("change", () => (this.monthlyMode = sel.value as "day" | "nth" | "last"));
-			line.createDiv({ cls: "tg-subhint", text: "Based on the due date." });
+			sel.addEventListener("change", () => {
+				const wasAfter = this.monthlyMode === "after";
+				this.monthlyMode = sel.value as "day" | "nth" | "last" | "after";
+				if (this.monthlyMode === "after" && !wasAfter && !this.existingRule?.afterDay) {
+					// Start from the due date: its weekday, counted from its own day, so it stays put.
+					this.afterWeekday = d.getDay() as Weekday;
+					this.afterDay = d.getDate();
+					this.afterNth = 1;
+					this.afterInclusive = true;
+				}
+				if (wasAfter !== (this.monthlyMode === "after")) this.renderCustom();
+				this.snapDueToAfter();
+			});
+			if (this.monthlyMode === "after") this.renderAfterControls(el);
+			else line.createDiv({ cls: "tg-subhint", text: "Based on the due date." });
 		}
 
 		const ends = el.createDiv({ cls: "tg-ends" });
@@ -422,6 +498,46 @@ export class TaskModal extends Modal {
 		});
 	}
 
+	/** "The [1st] [Monday] [after] day [10]": the controls of the "after" mode, and a preview of its dates. */
+	private renderAfterControls(el: HTMLElement): void {
+		const line = el.createDiv({ cls: "tg-custom-line tg-after-line" });
+		const changed = () => this.snapDueToAfter();
+		line.createSpan({ text: "The" });
+		const nth = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "Which one" } });
+		for (let i = 1; i <= 4; i++) nth.createEl("option", { value: String(i), text: ordinal(i) });
+		nth.value = String(this.afterNth);
+		nth.addEventListener("change", () => {
+			this.afterNth = parseInt(nth.value) || 1;
+			changed();
+		});
+		const wd = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "Weekday" } });
+		for (let i = 0; i < 7; i++) wd.createEl("option", { value: String(i), text: WEEKDAY_LONG[i] });
+		wd.value = String(this.afterWeekday);
+		wd.addEventListener("change", () => {
+			this.afterWeekday = (parseInt(wd.value) || 0) as Weekday;
+			changed();
+		});
+		const incl = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "After, or on or after" } });
+		incl.createEl("option", { value: "after", text: "after" });
+		incl.createEl("option", { value: "onOrAfter", text: "on or after" });
+		incl.value = this.afterInclusive ? "onOrAfter" : "after";
+		incl.addEventListener("change", () => {
+			this.afterInclusive = incl.value === "onOrAfter";
+			changed();
+		});
+		line.createSpan({ text: "day" });
+		const day = line.createEl("input", { cls: "tg-input tg-num", attr: { type: "number", min: "1", max: "31", "aria-label": "Day of the month" } });
+		day.value = String(this.afterDay);
+		day.addEventListener("input", () => {
+			const n = parseInt(day.value);
+			if (!(n >= 1 && n <= 31)) return;
+			this.afterDay = n;
+			changed();
+		});
+		this.afterPreviewEl = el.createDiv({ cls: "tg-subhint" });
+		this.renderAfterPreview();
+	}
+
 	private buildRule(due: string): RecurrenceRule | null {
 		if (this.repeat === "none") return null;
 		const prev = this.existingRule;
@@ -441,14 +557,18 @@ export class TaskModal extends Modal {
 				freq: this.freq,
 				interval: this.interval,
 				byWeekday: this.freq === "weekly" ? [...this.weekdays].sort() : [d.getDay() as Weekday],
-				monthlyMode: this.monthlyMode === "day" ? "day" : "nth",
+				monthlyMode: this.monthlyMode === "day" ? "day" : this.monthlyMode === "after" ? "after" : "nth",
 				monthDay: d.getDate(),
-				nth: this.monthlyMode === "last" ? -1 : Math.min(4, nthOfMonth(due)),
-				nthWeekday: d.getDay() as Weekday,
+				nth: this.monthlyMode === "last" ? -1 : this.monthlyMode === "after" ? this.afterNth : Math.min(4, nthOfMonth(due)),
+				nthWeekday: this.monthlyMode === "after" ? this.afterWeekday : (d.getDay() as Weekday),
 				end,
 				occurrence: 1,
 				anchor: due,
 			};
+			if (rule.monthlyMode === "after") {
+				rule.afterDay = this.afterDay;
+				rule.afterInclusive = this.afterInclusive;
+			}
 		}
 		if (prev) {
 			rule.occurrence = prev.occurrence;
@@ -468,6 +588,8 @@ export class TaskModal extends Modal {
 			due = today();
 			new Notice("Repeating tasks need a due date; using today.");
 		}
+		// An "after" rule needs a due date that fits it.
+		if (due && this.isAfterMode()) due = firstMatchOnOrAfter(this.afterRule(due), due);
 		const rule = due ? this.buildRule(due) : null;
 		const time = due && this.time ? this.time : null;
 		const task = this.opts.task;

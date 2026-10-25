@@ -8,7 +8,7 @@ An Obsidian plugin that syncs your **Google Tasks** both ways and shows them eit
 - **Two-way Google Tasks sync**: all lists, titles, notes, due dates, completion, subtasks. Create, edit, complete, uncomplete and delete from Obsidian or Google.
 - **Board view**: cards in columns grouped by list, by due date (Overdue / Today / Tomorrow / Later, plus day columns you add for any day) or by status. Drag cards between columns, or use the ⋯ menu (long-press on mobile), to move them between lists, change the date or complete them.
 - **Calendar view**: your tasks on a month or week calendar; page back and forth between months or weeks. Upcoming repeats of repeating tasks are shown too.
-- **Search all tasks** from the view header, across every list, date and completed task.
+- **Search all tasks** from the view header, across every list, date and completed task, plus the next repeats of repeating tasks.
 - **Daily note**: add today's tasks to your daily note as a checklist, with descriptions under the tasks (optional, off by default).
 - **Gift mode**: a wrapped box that reveals 1–5 random tasks, with "Done" and "Draw again" buttons. The current draw survives restarts.
 - **Task modal**: title, notes, list, date, time, and Google-Calendar-style recurrence.
@@ -69,7 +69,7 @@ The day topics shown in the view's header have a third note of their own, `Task 
 - **New task**: the clipboard-plus ribbon icon, the `+` in the view header or in a column, or the command *Task Gift: New task*.
 - **Edit**: click a card. The modal also has **Delete**.
 - **Sync**: automatic on startup, every N seconds (default 300, at least 15) and about 1.5 seconds after local edits. You can also use the sync button, the command *Sync now*, or *Full resync* to re-download everything.
-- **Search all tasks**: the 🔍 button in the view header (board and calendar) searches every task by title or description, in all lists, whatever its date, mode or status (completed tasks as far as they are kept locally). Esc or the button again closes the search.
+- **Search all tasks**: the 🔍 button in the view header (board and calendar) searches every task by title or description, in all lists, whatever its date, mode or status (completed tasks as far as they are kept locally). Each open repeating task also shows its next 3 repeats (dashed, *Upcoming repeat*), dated as if every one were done on its day; clicking one opens the current task. Esc or the button again closes the search.
 - **Search a column**: the 🔍 button in a column header opens a search box for that column only; it filters its cards by title or description as you type (Esc clears and closes it).
 - **Sort a column**: the sort button next to it orders that column's cards by date, oldest or newest first (completion date for completed tasks, due date otherwise), or back to the default order. Each column remembers its own order.
 - **All completed tasks**: set *Keep completed tasks* to *Forever (no limit)*, or use *Download all completed tasks* in settings (or the command of the same name) to pull every completed task you have in Google, however old.
@@ -96,6 +96,7 @@ The day topics shown in the view's header have a third note of their own, `Task 
 The Google Tasks API **cannot create recurring tasks** and **stores dates only, no times**. Task Gift works around this:
 
 - The repeat rule and the time are stored in the Task Gift data note, keyed by task ID, and shown on cards.
+- Besides Google Calendar's rules, a monthly repeat can fall on **a weekday after a day of the month**, e.g. *the 1st Monday after day 10*: *Repeat → Custom… → month(s)*, then *Monthly on a weekday after a day of the month…*. Choose *after* or *on or after* (whether that day itself counts); the due date moves to the first matching day and the next dates are previewed. The date may fall in the next month (the 2nd Friday after day 28).
 - When a repeating task is completed, from anywhere (board, gift, or the Google Tasks app, picked up on the next sync), Task Gift creates the **next occurrence** in Google with the next due date and moves the rule to it. Ends "after N occurrences" and "on date" are honoured.
 - Google's apps only see ordinary one-off tasks with a date. If Obsidian isn't running, the next occurrence is created on the next sync.
 - If a repeating task was overdue when you complete it, missed occurrences are skipped: the next one is due today or later (they still count towards an "after N occurrences" end).

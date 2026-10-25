@@ -1,7 +1,7 @@
 import { App, Modal, Setting, setIcon } from "obsidian";
 import { TASK_COLORS, taskColorCss } from "../defaults";
 import type { DayTitle, DayTitleEndNote, DayTitleEndPosition, DayTitlePart, DayTitleSize, DayTitleStyle, NamedTaskColor, TaskColor } from "../types";
-import { addDays, shortDate } from "../util/dates";
+import { addDays, shortDate, today } from "../util/dates";
 
 const SIZE_LABELS: Record<DayTitleSize, string> = { small: "Small", normal: "Normal", large: "Large", huge: "Huge" };
 
@@ -324,8 +324,13 @@ export class DayTitleModal extends Modal {
 		const ends = new Setting(contentEl)
 			.setName("Ends")
 			.setDesc("After that the header shows no topic (or an earlier one that still lasts). Without a time it ends at the end of that day.");
-		const until = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until", attr: { type: "date", min: this.date, "aria-label": "Last day" } });
-		until.value = typeof this.draft.until === "string" ? this.draft.until : addDays(this.date, 7);
+		// A past day can't be the last one: the earliest is today (or the topic's own day, when that is later).
+		// Read at the time of use, so a modal left open past midnight moves on too.
+		const firstDay = () => (today() > this.date ? today() : this.date);
+		const until = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until", attr: { type: "date", min: firstDay(), "aria-label": "Last day" } });
+		const stored = typeof this.draft.until === "string" ? this.draft.until : addDays(firstDay(), 7);
+		until.value = stored < firstDay() ? firstDay() : stored;
+		for (const ev of ["focus", "pointerdown"]) until.addEventListener(ev, () => (until.min = firstDay()));
 		// Empty = at the end of that day.
 		const untilTime = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until-time", attr: { type: "time", "aria-label": "End time" } });
 		untilTime.value = this.draft.untilTime ?? "";
@@ -338,6 +343,8 @@ export class DayTitleModal extends Modal {
 			noteBox.toggleClass("tg-day-title-off", e !== "date" || !note.shown);
 		};
 		const readEnd = (e: DayTitleEnd) => {
+			// A typed date gets past `min`; lift it to the first allowed day.
+			if (until.value && until.value < firstDay()) until.value = firstDay();
 			this.draft.until = e === "never" ? null : e === "date" && until.value ? until.value : undefined;
 			this.draft.untilTime = typeof this.draft.until === "string" && untilTime.value ? untilTime.value : undefined;
 			showUntil(e);
