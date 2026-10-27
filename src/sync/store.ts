@@ -1,9 +1,11 @@
 import type { DayTitle, RecurrenceRule, StoreData, Task, TaskColor, TaskList } from "../types";
 import { nextOccurrence } from "../recurrence/rule";
-import { addDays, today } from "../util/dates";
+import { addDays, addMonths, today } from "../util/dates";
 
 /** Day headings older than this many days are dropped. */
 const KEEP_DAY_TITLES_DAYS = 60;
+/** How far ahead `removeDuplicates` looks for open tasks with the same title on the same day. */
+export const DUPLICATE_CHECK_MONTHS = 3;
 
 /** Whether the heading written for `start` is still shown on `date` (on or after `start`). */
 /** Whether a heading still shows on `date`; `time` (HH:MM, today only) also ends it after its `untilTime`. */
@@ -336,6 +338,47 @@ export class TaskStore {
 		const modes = this.data.taskModes[task.id];
 		if (modes) this.data.taskModes[target.id] ??= [...modes];
 		this.data.spawned[task.id] = target.id;
+	}
+
+	/**
+	 * Deletes open tasks that have exactly the same title on the same day, from today up to `months` ahead, and
+	 * returns the titles removed. Two devices can each create the next occurrence of a repeating task before either
+	 * sees the other's copy; both copies reach Google. Every device must keep the same copy, so the choice only uses
+	 * what Google gave all of them (the smallest Google ID); groups with a copy not yet in Google wait for a later sync.
+	 */
+	removeDuplicates(months = DUPLICATE_CHECK_MONTHS): string[] {
+		const from = today();
+		const to = addMonths(from, months);
+		const groups = new Map<string, Task[]>();
+		for (const t of this.all()) {
+			if (t.status !== "needsAction" || !t.due || t.due < from || t.due > to) continue;
+			const key = `${t.due}\n${t.title}`;
+			const group = groups.get(key);
+			if (group) group.push(t);
+			else groups.set(key, [t]);
+		}
+		const removed: string[] = [];
+		for (const group of groups.values()) {
+			if (group.length < 2 || group.some((t) => isLocalId(t.id))) continue;
+			// A task with subtasks isn't a spawned copy; leave such groups to the user.
+			if (group.some((t) => this.children(t.id).length)) continue;
+			group.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+			const [keep, ...extra] = group;
+			for (const t of extra) {
+				// The copy that is kept takes over the repeat rule, time, color and modes if it has none.
+				if (this.data.recurrence[t.id]) this.data.recurrence[keep.id] ??= this.data.recurrence[t.id];
+				if (this.data.times[t.id]) this.data.times[keep.id] ??= this.data.times[t.id];
+				if (this.data.colors[t.id]) this.data.colors[keep.id] ??= this.data.colors[t.id];
+				if (this.data.taskModes[t.id]) this.data.taskModes[keep.id] ??= this.data.taskModes[t.id];
+				if (!keep.notes && t.notes) this.update(keep.id, { notes: t.notes }, "remote");
+				for (const [k, v] of Object.entries(this.data.spawned)) if (v === t.id) this.data.spawned[k] = keep.id;
+				const g = this.data.gift;
+				g.drawn = [...new Set(g.drawn.map((x) => (x === t.id ? keep.id : x)))];
+				this.delete(t.id, "remote");
+				removed.push(t.title);
+			}
+		}
+		return removed;
 	}
 
 	/** Drops old completed tasks from local state (they stay in Google). */

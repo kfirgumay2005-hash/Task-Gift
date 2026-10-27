@@ -12,7 +12,7 @@ import { calendarsFolderFor, CalendarStore } from "./calendars/store";
 import { templatesFolderFor, TemplateStore } from "./calendars/templates";
 import { CalendarImportModal } from "./modals/CalendarModals";
 import { SyncEngine, SyncStatus } from "./sync/engine";
-import { ChangeSource, TaskStore } from "./sync/store";
+import { ChangeSource, DUPLICATE_CHECK_MONTHS, TaskStore } from "./sync/store";
 import { activeMode, normalizeModes } from "./modes";
 import { normalizeDayColumns, pruneDayColumns } from "./dayColumns";
 import { appendToNote, hasHeading, isDailyNotesEnabled, tasksMarkdown, todayNote, todayNotePath } from "./dailyNote";
@@ -52,6 +52,11 @@ const FILE_CHECK_MS = 2000;
 const SYNC_STAMP_WRITE_MS = 10 * 60 * 1000;
 /** The plugin's files whose change (an update arriving through sync) reloads the plugin. */
 const CODE_FILES = ["main.js", "styles.css", "manifest.json"];
+
+function duplicatesMessage(titles: string[]): string {
+	const names = [...new Set(titles)].map((t) => `"${t}"`).join(", ");
+	return `Task Gift removed ${titles.length} duplicate task(s): ${names}`;
+}
 
 export default class TaskGiftPlugin extends Plugin {
 	settings!: TaskGiftSettings;
@@ -102,6 +107,7 @@ export default class TaskGiftPlugin extends Plugin {
 			afterSync: () => this.persist(),
 			onStatus: (s) => this.onSyncStatus(s),
 			onError: (msg) => this.showError(msg),
+			onDuplicatesRemoved: (titles) => new Notice(duplicatesMessage(titles)),
 		});
 
 		this.calendars = new CalendarStore(this.app, () => calendarsFolderFor(this.dataFile.path), () => this.refreshViewsSoon());
@@ -141,6 +147,7 @@ export default class TaskGiftPlugin extends Plugin {
 		this.addCommand({ id: "edit-modes", name: "Edit modes", callback: () => void this.openModes() });
 		this.addCommand({ id: "sync-now", name: "Sync now", callback: () => void this.syncNow() });
 		this.addCommand({ id: "full-resync", name: "Full resync with Google", callback: () => void this.syncNow(true) });
+		this.addCommand({ id: "remove-duplicates", name: "Remove duplicate tasks", callback: () => this.removeDuplicates() });
 		this.addCommand({ id: "sync-all-completed", name: "Download all completed tasks from Google", callback: () => void this.syncAllCompleted() });
 		this.addCommand({
 			id: "toggle-gift-mode",
@@ -652,6 +659,17 @@ export default class TaskGiftPlugin extends Plugin {
 		this.lastErrorNotice = "";
 		await this.engine.sync(full);
 		if (this.engine.status.state === "idle") new Notice("Google Tasks synced.");
+	}
+
+	/** Deletes open tasks with the same title on the same day (also done after every sync). */
+	removeDuplicates(): void {
+		const removed = this.store.removeDuplicates();
+		if (!removed.length) {
+			new Notice(`No duplicate tasks in the next ${DUPLICATE_CHECK_MONTHS} months.`);
+			return;
+		}
+		new Notice(duplicatesMessage(removed));
+		this.store.notify("local");
 	}
 
 	/** Keeps completed tasks forever and downloads every completed task from Google. */

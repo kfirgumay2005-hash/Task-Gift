@@ -82,6 +82,12 @@ not in the settings note (otherwise two devices write the settings note at once 
 - Google Tasks API has no recurrence and no due times: repeat rules, times, colors and per-task modes are stored
   locally in the store, keyed by task ID. Keep `remap` / `forget` / `maybeSpawnNext` in `sync/store.ts` in step
   when adding another per-task map.
+- Repeating tasks could still be created twice: both devices completed/pulled within the same second and each
+  created the next occurrence before seeing the other's (two copies ~200 ms apart in Google). Push now inserts new
+  tasks before sending completions, and after every pull `store.removeDuplicates` deletes open tasks with exactly
+  the same title on the same day, today up to `DUPLICATE_CHECK_MONTHS` ahead (also the "Remove duplicate tasks"
+  command). It keeps the smallest Google ID so every device deletes the same copy, and skips groups with an
+  unpushed (`local-`) copy until it has an ID.
 - Monthly repeats can be "the Nth weekday (on or) after day X" (`monthlyMode: "after"`, `afterDay`, `afterInclusive`;
   the date may spill into the next month). Older plugin versions read such a rule as "monthly on `monthDay`".
 - The header search also lists the next `UPCOMING_REPEATS` (3) occurrences of each open repeating task, computed

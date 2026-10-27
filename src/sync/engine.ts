@@ -19,6 +19,8 @@ export interface SyncHooks {
 	afterSync(): Promise<void>;
 	onStatus(status: SyncStatus): void;
 	onError(message: string): void;
+	/** Open tasks deleted because another task with the same title was on the same day. */
+	onDuplicatesRemoved(titles: string[]): void;
 }
 
 const FULL_SYNC_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -176,6 +178,8 @@ export class SyncEngine {
 			if (t?.status === "completed") this.store.maybeSpawnNext(t);
 		}
 		this.completedRemotely = [];
+		const removed = this.store.removeDuplicates();
+		if (removed.length) this.hooks.onDuplicatesRemoved(removed);
 		data.lastSyncAt = startedAt;
 		if (full) data.lastFullSyncAt = startedAt;
 	}
@@ -310,20 +314,8 @@ export class SyncEngine {
 			}
 		}
 
-		// 2. Updates to existing tasks
-		for (const t of dirty.filter((x) => !x.pendingDelete && !isLocalId(x.id) && data.tasks[x.id])) {
-			try {
-				await this.pushUpdate(t);
-			} catch (e) {
-				if (e instanceof NetworkError || e instanceof AuthError) throw e;
-				if (e instanceof ApiError && e.status === 404) {
-					warn(`"${t.title}" no longer exists in Google; re-creating it.`);
-					this.handleRemoteDeletion(t);
-				} else this.reportTaskFailure(t, e);
-			}
-		}
-
-		// 3. Inserts, parents before children
+		// 2. Inserts, parents before children. Before updates, so a device that sees a repeating task completed in
+		//    Google also sees the next occurrence this device created for it, and doesn't create its own copy.
 		for (let pass = 0; pass < 5; pass++) {
 			const inserts = Object.values(data.tasks).filter((x) => x.dirty && !x.pendingDelete && isLocalId(x.id));
 			if (!inserts.length) break;
@@ -344,6 +336,19 @@ export class SyncEngine {
 					if (e instanceof NetworkError || e instanceof AuthError) throw e;
 					this.reportTaskFailure(t, e);
 				}
+			}
+		}
+
+		// 3. Updates to existing tasks (tasks just inserted are no longer dirty)
+		for (const t of dirty.filter((x) => x.dirty && !x.pendingDelete && !isLocalId(x.id) && data.tasks[x.id])) {
+			try {
+				await this.pushUpdate(t);
+			} catch (e) {
+				if (e instanceof NetworkError || e instanceof AuthError) throw e;
+				if (e instanceof ApiError && e.status === 404) {
+					warn(`"${t.title}" no longer exists in Google; re-creating it.`);
+					this.handleRemoteDeletion(t);
+				} else this.reportTaskFailure(t, e);
 			}
 		}
 	}
