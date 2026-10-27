@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Menu, Notice, setIcon } from "obsidian";
+import { Component, MarkdownRenderer, Menu, Notice, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import type { StickyColor, StickyCommand, StickyNote } from "../types";
 import { TASK_COLORS } from "../defaults";
@@ -20,7 +20,7 @@ const DEFAULT_COMMAND_ICONS: Record<string, string> = { highlight: "highlighter"
  * The empty side of the board, after the columns: sticky notes placed freely. Drag a note by its top bar,
  * resize it from its corner, double-click the empty area to add one there.
  */
-export function renderStickies(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState): void {
+export function renderStickies(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, owner: Component): void {
 	const store = plugin.store;
 	const zoom = () => plugin.settings.boardZoom / 100;
 	const area = board.createDiv({ cls: "tg-stickies" });
@@ -63,10 +63,10 @@ export function renderStickies(board: HTMLElement, plugin: TaskGiftPlugin, ui: B
 		add((e.clientX - rect.left) / z - STICKY_WIDTH / 2, (e.clientY - rect.top) / z - 14);
 	});
 
-	for (const [id, n] of notes) renderSticky(canvas, plugin, ui, id, n, zoom);
+	for (const [id, n] of notes) renderSticky(canvas, plugin, ui, owner, id, n, zoom);
 }
 
-function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, id: string, n: StickyNote, zoom: () => number): void {
+function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, owner: Component, id: string, n: StickyNote, zoom: () => number): void {
 	const store = plugin.store;
 	const el = canvas.createDiv({ cls: "tg-sticky" });
 	el.dataset.sticky = id;
@@ -91,13 +91,18 @@ function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSt
 	text.value = n.text;
 	text.dataset.sticky = id;
 
+	// Each render gets its own child of the board's owner, unloaded when the note is rendered again.
+	let rendered: Component | null = null;
 	const renderView = () => {
 		view.empty();
+		if (rendered) owner.removeChild(rendered);
+		rendered = null;
 		if (!text.value.trim()) {
 			view.createDiv({ cls: "tg-sticky-placeholder", text: "Write something…" });
 			return;
 		}
-		void MarkdownRenderer.render(plugin.app, text.value, view, "", plugin);
+		rendered = owner.addChild(new Component());
+		void MarkdownRenderer.render(plugin.app, text.value, view, "", rendered);
 	};
 	const startEdit = () => {
 		el.addClass("is-editing");

@@ -1,4 +1,4 @@
-import { ItemView, Menu, setIcon, WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, Menu, setIcon, WorkspaceLeaf } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import { VIEW_TYPE } from "../defaults";
 import { describeFilter } from "../filters/dates";
@@ -26,6 +26,8 @@ export class TaskView extends ItemView {
 	/** Header search over all tasks; while it has text, the body shows its results. */
 	private search = { open: false, query: "" };
 	private bodyEl!: HTMLElement;
+	/** Owns what the drawn board renders (sticky notes' Markdown); replaced on every redraw, so nothing piles up. */
+	private boardRender: Component | null = null;
 	private syncBtn!: HTMLElement;
 	/** Shown under the header while Google isn't connected, so a sign-in that expired doesn't go unnoticed. */
 	private authBannerEl: HTMLElement | null = null;
@@ -112,6 +114,7 @@ export class TaskView extends ItemView {
 		this.contentEl.toggleClass("is-gift-mode", mode === "gift");
 		this.contentEl.toggleClass("is-calendar-mode", mode === "calendar");
 		this.contentEl.toggleClass("is-modes-mode", mode === "modes");
+		if (mode !== "board" || this.search.query.trim()) this.releaseBoardRender();
 		if (mode === "modes") {
 			// Redraws only when the settings were replaced (e.g. changed on another device), so typing keeps focus.
 			this.modesEditor.render(this.bodyEl, this.renderedMode !== "modes");
@@ -161,6 +164,11 @@ export class TaskView extends ItemView {
 		}
 	}
 
+	private releaseBoardRender(): void {
+		if (this.boardRender) this.removeChild(this.boardRender);
+		this.boardRender = null;
+	}
+
 	private renderBoardBody(): void {
 		const board = this.bodyEl.querySelector(".tg-board");
 		const scrollLeft = board?.scrollLeft ?? 0;
@@ -182,7 +190,9 @@ export class TaskView extends ItemView {
 		this.boardUi.focusSticky = focusId;
 
 		this.bodyEl.empty();
-		renderBoard(this.bodyEl, this.plugin, this.boardUi, (zoom) => void this.setZoom(zoom));
+		this.releaseBoardRender();
+		this.boardRender = this.addChild(new Component());
+		renderBoard(this.bodyEl, this.plugin, this.boardUi, this.boardRender, (zoom) => void this.setZoom(zoom));
 
 		const stickies = this.bodyEl.querySelector(".tg-stickies");
 		if (stickies) stickies.scrollTop = stickiesScroll;

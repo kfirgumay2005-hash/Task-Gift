@@ -1,4 +1,4 @@
-import { Menu, Notice, setIcon } from "obsidian";
+import { Component, Menu, Notice, setIcon } from "obsidian";
 import type TaskGiftPlugin from "../main";
 import type { BoardSort, DayColumn, Task } from "../types";
 import { dayColumnKey, dayColumnTitle, newDayColumnId, visibleDayColumns } from "../dayColumns";
@@ -189,7 +189,8 @@ function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	return cols.filter((c) => (c.key !== "overdue" && c.key !== "completed") || c.tasks.length > 0);
 }
 
-export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, onZoom: (zoom: number) => void): void {
+/** `owner` holds what the board renders (sticky notes' Markdown) and is unloaded when the board is redrawn. */
+export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiState, owner: Component, onZoom: (zoom: number) => void): void {
 	const columns = buildColumns(plugin, plugin.store.all());
 	const board = container.createDiv({ cls: "tg-board" });
 	board.style.setProperty("--tg-zoom", String(plugin.settings.boardZoom / 100));
@@ -211,7 +212,7 @@ export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: 
 		add.addEventListener("click", () => openDayColumnModal(plugin, null));
 	}
 
-	renderStickies(board, plugin, ui);
+	renderStickies(board, plugin, ui, owner);
 }
 
 /** Adds a day column, or edits `existing`. */

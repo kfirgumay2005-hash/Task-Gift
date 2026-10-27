@@ -46,6 +46,15 @@ export class Menu {
 	addSeparator() { return this; }
 	showAtMouseEvent() { window.lastMenu = this.items; }
 }
+/** Parent/child loading only; children are unloaded with their parent or when removed. */
+export class Component {
+	_children = [];
+	_loaded = false;
+	load() { this._loaded = true; this._children.forEach((c) => c.load()); }
+	unload() { this._children.forEach((c) => c.unload()); this._loaded = false; }
+	addChild(c) { this._children.push(c); if (this._loaded) c.load(); return c; }
+	removeChild(c) { const i = this._children.indexOf(c); if (i >= 0) { this._children.splice(i, 1); c.unload(); } return c; }
+}
 /** Tiny Markdown stand-in: bold, highlight and raw <u> only. */
 export const MarkdownRenderer = {
 	render: async (app, md, el) => {
