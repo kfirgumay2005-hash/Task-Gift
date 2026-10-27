@@ -109,4 +109,14 @@ not in the settings note (otherwise two devices write the settings note at once 
   (`src/calendars/templates.ts`), read only when the Templates menu opens. Lines ending with ":" and `___` are
   fields; a template with fields opens a fill-in form before it's inserted.
 - Modes are switched and edited only from gift mode (the Modes tab and the mode chip show only there).
+- Sticky notes fill the board's empty side after the columns (`views/stickies.ts`). They live in the store
+  (`stickies`, merged per note by `updated`, deleted = tombstone; color `"default"` = Obsidian's neutral background, the default for new notes) and are saved in the topics note next to the
+  day topics. Typing saves without redrawing (`plugin.saveLater`); `TaskView.renderBoardBody` keeps the caret when a
+  sync redraws. A note is Markdown: rendered (`MarkdownRenderer`) until clicked, then a textarea. Its top bar
+  shows `settings.stickyCommands` as buttons next to the color (palette) button (defaults Highlight, Underline, Bold; edited in the settings tab as a
+  `type: "list"` group, missing = defaults, empty = all deleted). A command is text markers (wrap/unwrap the
+  selection in `before`/`after`) or any Obsidian command (`commandId`, picked from `app.commands.commands`).
+  Obsidian's editor commands can't reach the sticky textarea, so `src/stickyCommands.ts` redoes the formatting ones
+  on the Markdown (`stickyEditFor`); other commands run via `executeCommandById`.
+  Test: `dev/ui-test/stickies.test.mjs`.
 - Board columns are folded with their eye button (`settings.collapsedColumns`); there is no "show completed" switch.

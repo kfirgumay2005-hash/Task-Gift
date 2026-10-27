@@ -2,7 +2,7 @@ import { debounce, Notice, Platform, Plugin, TAbstractFile, TFile, WorkspaceLeaf
 import { TasksApi } from "./api/client";
 import { GiftMusic } from "./audio/music";
 import { AuthError, refresh, revoke } from "./auth/oauth";
-import { DEFAULT_SETTINGS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS, VIEW_TYPE } from "./defaults";
+import { DEFAULT_SETTINGS, DEFAULT_STICKY_COMMANDS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS, VIEW_TYPE } from "./defaults";
 import { ConfirmModal } from "./modals/ConfirmModal";
 import { ConnectModal } from "./modals/ConnectModal";
 import { LoginModal } from "./modals/LoginModal";
@@ -100,7 +100,7 @@ export default class TaskGiftPlugin extends Plugin {
 		await this.loadPluginData();
 
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
-		if (this.loadedTopics) this.store.mergeDayTitles(this.loadedTopics.dayTitles);
+		if (this.loadedTopics) this.mergeTopics(this.loadedTopics);
 		this.shownTopic = this.topicKey();
 		this.api = new TasksApi(() => this.accessToken());
 		this.engine = new SyncEngine(this.api, this.store, () => this.settings, () => this.auth !== null, {
@@ -293,6 +293,18 @@ export default class TaskGiftPlugin extends Plugin {
 		else s.collapsedColumns = raw.collapsedColumns.filter((k): k is string => typeof k === "string");
 		delete (s as unknown as Record<string, unknown>).showCompleted;
 		if (!Array.isArray(s.customTaskColors)) s.customTaskColors = [];
+		// Missing = never set up: start with the default commands. An empty list means the user deleted them all.
+		s.stickyCommands = Array.isArray(raw?.stickyCommands)
+			? raw.stickyCommands
+					.filter((c) => c && typeof c.id === "string" && typeof c.before === "string" && typeof c.after === "string")
+					.map((c) => ({
+						id: c.id,
+						name: typeof c.name === "string" ? c.name : "",
+						before: c.before,
+						after: c.after,
+						...(typeof c.commandId === "string" && c.commandId ? { commandId: c.commandId } : {}),
+					}))
+			: DEFAULT_STICKY_COMMANDS.map((c) => ({ ...c }));
 		if (!["both", "board", "calendar", "off"].includes(s.taskColorScope)) s.taskColorScope = DEFAULT_SETTINGS.taskColorScope;
 		if (!KEEP_COMPLETED_OPTIONS.includes(s.keepCompletedDays)) {
 			// Snap older free-form values to the nearest allowed option at or above them.
@@ -305,6 +317,7 @@ export default class TaskGiftPlugin extends Plugin {
 		const store = Object.assign(emptyStore(), raw ?? {});
 		if (!store.taskModes || typeof store.taskModes !== "object") store.taskModes = {};
 		if (!store.dayTitles || typeof store.dayTitles !== "object") store.dayTitles = {};
+		if (!store.stickies || typeof store.stickies !== "object") store.stickies = {};
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
 		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
 		return store;
@@ -344,8 +357,15 @@ export default class TaskGiftPlugin extends Plugin {
 	private async readTopics(): Promise<StoredTopics | null> {
 		const topics = await this.topicsFile.read();
 		if (!topics?.dayTitles || typeof topics.dayTitles !== "object") return null;
-		this.topicsFile.adopt(topicsData(topics.dayTitles));
+		this.topicsFile.adopt(topicsData(topics.dayTitles, topics.stickies ?? {}));
 		return topics;
+	}
+
+	/** Takes over the topics and sticky notes from the topics note. Returns whether anything changed. */
+	private mergeTopics(topics: StoredTopics): boolean {
+		const titles = this.store.mergeDayTitles(topics.dayTitles);
+		const stickies = this.store.mergeStickies(topics.stickies);
+		return titles || stickies;
 	}
 
 	/** Called on layout ready: adopt a data note found elsewhere, or create the default one. */
@@ -361,7 +381,7 @@ export default class TaskGiftPlugin extends Plugin {
 				if (data || settings) this.applyExternal({ ...data, ...(settings ? { settings } : {}) }, true);
 				if (settings) this.settingsFile.adopt(this.settings);
 				const topics = await this.readTopics();
-				if (topics) this.store.mergeDayTitles(topics.dayTitles);
+				if (topics) this.mergeTopics(topics);
 			}
 			await this.savePointer();
 		}
@@ -378,7 +398,7 @@ export default class TaskGiftPlugin extends Plugin {
 		if (!this.store || !this.dataReady) return;
 		// Each note is only rewritten when its own contents changed.
 		await this.settingsFile.write(this.settings);
-		await this.topicsFile.write(topicsData(this.store.data.dayTitles));
+		await this.topicsFile.write(topicsData(this.store.data.dayTitles, this.store.data.stickies));
 		// A sync that found nothing new only moves lastSyncAt. With syncs seconds apart, writing the data note for that
 		// would keep the sync tool busy and clash with the other device's writes, so it is only written now and then.
 		// An older lastSyncAt on disk only makes the next start fetch a little more.
@@ -427,7 +447,7 @@ export default class TaskGiftPlugin extends Plugin {
 			this.topicsFile.path = topicsPathFor(target);
 			this.applyExternal({ ...existing, ...(settings ? { settings } : {}) }, true);
 			const topics = await this.readTopics();
-			if (topics) this.store.mergeDayTitles(topics.dayTitles);
+			if (topics) this.mergeTopics(topics);
 		} else {
 			try {
 				await this.dataFile.moveTo(target);
@@ -468,9 +488,13 @@ export default class TaskGiftPlugin extends Plugin {
 			const d = this.store.data;
 			if (replace || Object.keys(d.tasks).length === 0) {
 				const topics = d.dayTitles;
+				const stickies = d.stickies;
 				Object.assign(d, inc);
-				// The topics have their own note; keep the ones read from it.
-				if (!replace) this.store.mergeDayTitles(topics);
+				// The topics and sticky notes have their own note; keep the ones read from it.
+				if (!replace) {
+					this.store.mergeDayTitles(topics);
+					this.store.mergeStickies(stickies);
+				}
 			} else {
 				d.recurrence = { ...d.recurrence, ...inc.recurrence };
 				d.times = { ...d.times, ...inc.times };
@@ -480,6 +504,7 @@ export default class TaskGiftPlugin extends Plugin {
 				d.aliases = { ...d.aliases, ...inc.aliases };
 				// Devices on an older version still keep the topics only here.
 				this.store.mergeDayTitles(inc.dayTitles);
+				this.store.mergeStickies(inc.stickies);
 				d.gift = inc.gift;
 				for (const l of Object.values(inc.lists)) if (!d.lists[l.id]) d.lists[l.id] = l;
 			}
@@ -505,8 +530,8 @@ export default class TaskGiftPlugin extends Plugin {
 		const topics = this.topicsFile.parse(raw);
 		if (!topics?.dayTitles || typeof topics.dayTitles !== "object") return;
 		// Written again only when this device holds a topic the note lacks (or a newer one), so the devices settle.
-		this.topicsFile.adopt(topicsData(topics.dayTitles));
-		if (this.store.mergeDayTitles(topics.dayTitles)) this.refreshViews();
+		this.topicsFile.adopt(topicsData(topics.dayTitles, topics.stickies ?? {}));
+		if (this.mergeTopics(topics)) this.refreshViews();
 		this.saveSoon();
 	}
 
@@ -531,6 +556,11 @@ export default class TaskGiftPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.persist();
 		this.refreshViews();
+	}
+
+	/** Persist soon without redrawing, e.g. while typing in a sticky note. */
+	saveLater(): void {
+		this.saveSoon();
 	}
 
 	/** Persist + refresh soon, used by views for UI state (e.g. gift state). */

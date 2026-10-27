@@ -1,9 +1,11 @@
-import { App, Platform, PluginSettingTab, SettingDefinitionItem, SettingGroupItem, TFolder } from "obsidian";
+import { App, Menu, Platform, PluginSettingTab, SettingDefinitionItem, SettingGroupItem, TFolder } from "obsidian";
 import type TaskGiftPlugin from "./main";
-import type { Grouping, TaskColorScope } from "./types";
-import { KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS } from "./defaults";
+import type { Grouping, StickyCommand, TaskColorScope } from "./types";
+import { DEFAULT_STICKY_COMMANDS, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS, newStickyCommandId } from "./defaults";
 import { isDailyNotesEnabled, todayNotePath } from "./dailyNote";
 import { SETTINGS_FILE_NAME } from "./storage/dataFile";
+import { CommandSuggestModal } from "./modals/CommandSuggestModal";
+import { commandRegistry, isEditorOnly, stickyEditFor } from "./stickyCommands";
 
 export class TaskGiftSettingTab extends PluginSettingTab {
 	constructor(app: App, private readonly plugin: TaskGiftPlugin) {
@@ -57,6 +59,16 @@ export class TaskGiftSettingTab extends PluginSettingTab {
 			{ type: "group", heading: "Sync", items: this.syncItems() },
 			{ type: "group", heading: "Modes", items: this.modesItems() },
 			{ type: "group", heading: "View", items: this.viewItems() },
+			{
+				type: "list",
+				heading: "Sticky note commands",
+				items: this.stickyCommandItems(),
+				emptyState: "No commands. Add one with +, or restore the default ones below.",
+				addItem: { name: "Add command", action: (el) => this.addStickyCommand(el) },
+				onDelete: (index) => this.changeStickyCommands((list) => list.splice(index, 1), true),
+				onReorder: (from, to) => this.changeStickyCommands((list) => list.splice(to, 0, ...list.splice(from, 1)), true),
+			},
+			{ type: "group", items: this.stickyCommandsFooter() },
 			{ type: "group", heading: "Daily note", items: this.dailyNoteItems() },
 		];
 	}
@@ -268,6 +280,100 @@ export class TaskGiftSettingTab extends PluginSettingTab {
 				name: "Show task colors",
 				desc: "Each task can get its own color in the task window. Choose where the colors are shown, or turn them off (the colors are kept).",
 				control: { type: "dropdown", key: "taskColorScope", options: colorScopeOptions },
+			},
+		];
+	}
+
+	// ----------------------------------------------------------- sticky notes
+
+	/**
+	 * Changes the sticky-note commands. Always works on the current settings object: settings arriving from another
+	 * device replace it, so nothing here may hold on to an older one.
+	 */
+	private changeStickyCommands(change: (list: StickyCommand[]) => void, redraw: boolean): void {
+		change(this.plugin.settings.stickyCommands);
+		void this.plugin.saveSettings();
+		if (redraw) this.update();
+	}
+
+	/** "+": an Obsidian command (picked like in the command palette) or text markers of your own. */
+	private addStickyCommand(el: HTMLElement): void {
+		const add = (cmd: Omit<StickyCommand, "id">) => this.changeStickyCommands((list) => list.push({ id: newStickyCommandId(), ...cmd }), true);
+		const menu = new Menu();
+		menu.addItem((i) =>
+			i
+				.setTitle("Obsidian command…")
+				.setIcon("terminal-square")
+				.onClick(() => new CommandSuggestModal(this.app, (c) => add({ name: c.name, before: "", after: "", commandId: c.id })).open()),
+		);
+		menu.addItem((i) =>
+			i
+				.setTitle("Text markers")
+				.setIcon("brackets")
+				.onClick(() => add({ name: "", before: "", after: "" })),
+		);
+		const r = el.getBoundingClientRect();
+		menu.showAtPosition({ x: r.left, y: r.bottom });
+	}
+
+	/** One row per command of a sticky note's menu: its name, and either its Obsidian command or its markers. */
+	private stickyCommandItems(): SettingGroupItem[] {
+		const registry = commandRegistry(this.app);
+		return this.plugin.settings.stickyCommands.map((cmd): SettingGroupItem => {
+			const commandId = cmd.commandId;
+			let desc = "Name, then the text put before and after the selected text.";
+			if (commandId) {
+				const found = registry.commands[commandId];
+				const what = stickyEditFor(commandId)
+					? "formats the sticky note's text"
+					: isEditorOnly(commandId)
+						? "only works in a note's editor, not in a sticky note"
+						: "runs in Obsidian";
+				desc = found ? `Obsidian command "${found.name}": ${what}.` : `Obsidian command ${commandId}: not available now (is its plugin turned off?).`;
+			}
+			return {
+				name: cmd.name || "Untitled command",
+				desc,
+				render: (setting) => {
+					const id = cmd.id;
+					const edit = (fields: Partial<StickyCommand>) =>
+						this.changeStickyCommands((list) => {
+							const c = list.find((x) => x.id === id);
+							if (c) Object.assign(c, fields);
+						}, false);
+					setting.addText((t) =>
+						t
+							.setPlaceholder("Name")
+							.setValue(cmd.name)
+							.onChange((v) => {
+								setting.setName(v || "Untitled command");
+								edit({ name: v });
+							}),
+					);
+					if (commandId) return;
+					setting
+						.addText((t) => t.setPlaceholder("Before, e.g. **").setValue(cmd.before).onChange((v) => edit({ before: v })))
+						.addText((t) => t.setPlaceholder("After, e.g. **").setValue(cmd.after).onChange((v) => edit({ after: v })));
+				},
+			};
+		});
+	}
+
+	private stickyCommandsFooter(): SettingGroupItem[] {
+		return [
+			{
+				name: "About sticky note commands",
+				desc: "They show as buttons in the top bar of every sticky note on the board, next to its color button. Add any Obsidian command with +: formatting commands (bold, italic, highlight, lists, headings, links…) format the sticky note's text, other commands run as from the command palette. Or add text markers of your own: they wrap the selected text, or remove themselves when it is already wrapped. Notes are Markdown, so e.g. ==text== is highlighted and <u>text</u> is underlined. Drag a row to change their order.",
+				render: (setting) => {
+					setting.addButton((b) =>
+						b.setButtonText("Restore default commands").onClick(() =>
+							this.changeStickyCommands((list) => {
+								// Adds the default ones that are missing, keeps the user's own.
+								for (const d of DEFAULT_STICKY_COMMANDS) if (!list.some((c) => c.id === d.id)) list.push({ ...d });
+							}, true),
+						),
+					);
+				},
 			},
 		];
 	}

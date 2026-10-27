@@ -150,6 +150,37 @@ export interface DayTitle extends DayTitleStyle {
 	updated: number;
 }
 
+/**
+ * A command in a sticky note's menu: an Obsidian command (`commandId`), or text markers that wrap the selected
+ * text in `before` … `after` (Markdown or HTML), or unwrap it.
+ */
+export interface StickyCommand {
+	id: string;
+	name: string;
+	before: string;
+	after: string;
+	/** An Obsidian command from the command palette; `before`/`after` are unused then. */
+	commandId?: string;
+}
+
+export type StickyColor = NamedTaskColor | "default";
+
+/** A note stuck on the empty part of the board, placed freely. Local only: it never reaches Google. */
+export interface StickyNote {
+	text: string;
+	/** "default" = Obsidian's own neutral background. */
+	color: StickyColor;
+	/** Position and size in px inside the sticky-note area (at 100% board zoom). */
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	/** Date.now() of the last edit; the newer one wins when two devices edited the same note. Newest is drawn on top. */
+	updated: number;
+	/** Kept for a while after deleting, so the deletion syncs. */
+	deleted?: boolean;
+}
+
 /** Where task colors are shown. */
 export type TaskColorScope = "both" | "board" | "calendar" | "off";
 
@@ -245,6 +276,8 @@ export interface TaskGiftSettings {
 	dailyNoteIncludeOverdue: boolean;
 	/** Date the tasks were last added automatically. */
 	dailyNoteInsertedOn: string;
+	/** Format commands in a sticky note's menu, in menu order. */
+	stickyCommands: StickyCommand[];
 }
 
 export interface AuthData {
@@ -286,6 +319,8 @@ export interface StoreData {
 	aliases: Record<string, string>;
 	/** Day headings, keyed by date (YYYY-MM-DD). A cleared one stays with empty text so the clearing syncs. */
 	dayTitles: Record<string, DayTitle>;
+	/** Sticky notes on the board, keyed by their own ID. A deleted one stays a while so the deletion syncs. */
+	stickies: Record<string, StickyNote>;
 	lastSyncAt: string | null;
 	lastFullSyncAt: string | null;
 	gift: GiftState;

@@ -5,6 +5,7 @@ import { dayColumnKey, dayColumnTitle, newDayColumnId, visibleDayColumns } from 
 import { DayColumnModal } from "../modals/DayColumnModal";
 import { addDays, today } from "../util/dates";
 import { renderCard } from "./card";
+import { renderStickies } from "./stickies";
 
 /** View-local (not saved) per-column search state. */
 export interface BoardUiState {
@@ -12,6 +13,10 @@ export interface BoardUiState {
 	queries: Map<string, string>;
 	/** Columns whose search box is open. */
 	searchOpen: Set<string>;
+	/** The sticky note being edited (or just added): drawn with its text open, which then gets the focus. */
+	focusSticky?: string;
+	/** Selection in a sticky note's text when it was left, so a format command still applies to it. */
+	stickySelection?: { id: string; start: number; end: number };
 	/** Ctrl + wheel / pinch movement not yet turned into a zoom step. */
 	zoomDelta: number;
 }
@@ -205,6 +210,8 @@ export function renderBoard(container: HTMLElement, plugin: TaskGiftPlugin, ui: 
 		add.createSpan({ text: "Add day column" });
 		add.addEventListener("click", () => openDayColumnModal(plugin, null));
 	}
+
+	renderStickies(board, plugin, ui);
 }
 
 /** Adds a day column, or edits `existing`. */
@@ -237,7 +244,8 @@ function enableBoardNavigation(board: HTMLElement, plugin: TaskGiftPlugin, ui: B
 			}
 			if (e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
 			if (board.scrollWidth <= board.clientWidth) return;
-			const cards = (e.target as HTMLElement).closest(".tg-column-cards");
+			const target = e.target as HTMLElement;
+			const cards = target.closest(".tg-column-cards, .tg-sticky-text, .tg-sticky-view, .tg-stickies");
 			if (cards && cards.scrollHeight > cards.clientHeight) return;
 			e.preventDefault();
 			board.scrollLeft += e.deltaY;

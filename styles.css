@@ -2224,6 +2224,225 @@
 	height: 15px;
 }
 
+/* ------------------------------------------------------------- sticky notes (empty side of the board) */
+
+.tg-stickies {
+	flex: 1 0 360px;
+	align-self: stretch;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: auto;
+	border-radius: var(--tg-radius);
+	border: 1px dashed var(--background-modifier-border);
+}
+
+.tg-stickies-toolbar {
+	position: sticky;
+	top: 0;
+	left: 0;
+	z-index: 2;
+	display: flex;
+	padding: 8px;
+	pointer-events: none;
+}
+
+.tg-stickies-add {
+	pointer-events: auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	border-radius: 999px;
+	border: 1px dashed var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.tg-stickies-add:hover,
+.tg-stickies-add:focus-visible {
+	color: var(--text-normal);
+	border-color: var(--interactive-accent);
+}
+
+.tg-stickies-add svg {
+	width: 15px;
+	height: 15px;
+}
+
+.tg-stickies-canvas {
+	position: relative;
+	flex: 1 0 auto;
+	margin-top: -8px;
+}
+
+.tg-stickies-hint {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	user-select: none;
+}
+
+.tg-sticky {
+	--tg-sticky-color: var(--color-yellow);
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	min-width: 110px;
+	min-height: 110px;
+	overflow: hidden;
+	resize: both;
+	border-radius: 4px 4px 4px 14px;
+	background: color-mix(in srgb, var(--tg-sticky-color) 32%, var(--background-primary));
+	border: 1px solid color-mix(in srgb, var(--tg-sticky-color) 55%, transparent);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+	transition: box-shadow 120ms ease;
+}
+
+/* Default color: Obsidian's own neutral backgrounds, so it fits any theme. */
+.tg-sticky.is-neutral {
+	background: var(--background-secondary);
+	border-color: var(--background-modifier-border);
+}
+
+.tg-sticky.is-neutral .tg-sticky-bar {
+	background: var(--background-modifier-hover);
+}
+
+.tg-sticky.is-moving {
+	box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+	z-index: 1;
+}
+
+.tg-sticky-bar {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 2px 4px;
+	min-height: 24px;
+	cursor: grab;
+	touch-action: none;
+	background: color-mix(in srgb, var(--tg-sticky-color) 45%, var(--background-primary));
+}
+
+.tg-sticky.is-moving .tg-sticky-bar {
+	cursor: grabbing;
+}
+
+.tg-sticky-tool {
+	padding: 2px;
+	opacity: 0;
+	transition: opacity 120ms ease;
+}
+
+.tg-sticky:hover .tg-sticky-tool,
+.tg-sticky:focus-within .tg-sticky-tool {
+	opacity: 1;
+}
+
+/* Keeps a spot to grab the bar however many command buttons there are. */
+.tg-sticky-bar .tg-spacer {
+	min-width: 20px;
+}
+
+/* Command buttons; many of them scroll sideways instead of pushing the color and delete buttons out. */
+.tg-sticky-commands {
+	display: flex;
+	gap: 1px;
+	min-width: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.tg-sticky-tool-text {
+	display: inline-block;
+	min-width: 14px;
+	font-size: 11px;
+	font-weight: var(--font-semibold);
+	line-height: 14px;
+	text-align: center;
+}
+
+.tg-sticky-tool svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tg-sticky .tg-sticky-text {
+	flex: 1 1 auto;
+	width: 100%;
+	min-height: 0;
+	margin: 0;
+	padding: 8px 10px 14px;
+	resize: none;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
+}
+
+/* Rendered Markdown when not editing; the text while editing. */
+.tg-sticky:not(.is-editing) .tg-sticky-text,
+.tg-sticky.is-editing .tg-sticky-view {
+	display: none;
+}
+
+.tg-sticky-view {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 8px 10px 14px;
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
+	cursor: text;
+	overflow-wrap: anywhere;
+}
+
+.tg-sticky-view > :first-child {
+	margin-top: 0;
+}
+
+.tg-sticky-view > :last-child {
+	margin-bottom: 0;
+}
+
+.tg-sticky-view p {
+	margin: 0 0 0.5em;
+}
+
+.tg-command-note {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.tg-sticky-placeholder {
+	color: var(--text-faint);
+}
+
+.tg-sticky .tg-sticky-text:focus,
+.tg-sticky .tg-sticky-text:hover {
+	border: none;
+	box-shadow: none;
+	background: transparent;
+}
+
+.is-mobile .tg-stickies {
+	flex-basis: 82vw;
+	scroll-snap-align: start;
+}
+
 /* ------------------------------------------------------------- calendar */
 
 .tg-view.is-calendar-mode .tg-body {

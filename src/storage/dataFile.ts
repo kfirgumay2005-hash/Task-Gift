@@ -1,5 +1,5 @@
 import { App, normalizePath, TFile } from "obsidian";
-import type { DayTitle, PluginData, TaskGiftSettings } from "../types";
+import type { DayTitle, PluginData, StickyNote, TaskGiftSettings } from "../types";
 
 export const DEFAULT_DATA_PATH = "Task Gift Data.md";
 /** The settings note sits next to the data note. */
@@ -44,7 +44,7 @@ export const SETTINGS_NOTE: NoteKind = {
 export const TOPICS_NOTE: NoteKind = {
 	marker: "task-gift-topics",
 	title: "Task Gift topics",
-	description: "This note stores Task Gift's day topics, so every device shows the same ones. Don't edit it by hand.",
+	description: "This note stores Task Gift's day topics and the board's sticky notes, so every device shows the same ones. Don't edit it by hand.",
 };
 
 /** The note's contents apart from the settings (those have their own note). */
@@ -221,11 +221,15 @@ export type StoredSettings = Partial<TaskGiftSettings>;
 /** Topics note contents. */
 export interface StoredTopics {
 	dayTitles: Record<string, DayTitle>;
+	/** The board's sticky notes: edited by hand now and then like the topics, so they share this note. */
+	stickies?: Record<string, StickyNote>;
 }
 
-/** The topics in date order, so the same topics always give the same note text. */
-export function topicsData(dayTitles: Record<string, DayTitle>): StoredTopics {
+/** The topics in date order (sticky notes by ID), so the same contents always give the same note text. */
+export function topicsData(dayTitles: Record<string, DayTitle>, stickies: Record<string, StickyNote>): StoredTopics {
 	const sorted: Record<string, DayTitle> = {};
 	for (const d of Object.keys(dayTitles).sort()) sorted[d] = dayTitles[d];
-	return { dayTitles: sorted };
+	const notes: Record<string, StickyNote> = {};
+	for (const id of Object.keys(stickies).sort()) notes[id] = stickies[id];
+	return { dayTitles: sorted, stickies: notes };
 }

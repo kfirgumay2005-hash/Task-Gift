@@ -1,4 +1,4 @@
-import type { DateFilter, GiftState, ModeAudio, NamedTaskColor, StoreData, TaskColor, TaskGiftSettings } from "./types";
+import type { DateFilter, GiftState, ModeAudio, NamedTaskColor, StickyCommand, StoreData, TaskColor, TaskGiftSettings } from "./types";
 
 export const VIEW_TYPE = "task-gift-view";
 
@@ -81,7 +81,19 @@ export const DEFAULT_SETTINGS: TaskGiftSettings = {
 	dailyNoteHeading: "## Tasks",
 	dailyNoteIncludeOverdue: true,
 	dailyNoteInsertedOn: "",
+	stickyCommands: [],
 };
+
+/** The format commands a sticky note starts with; they can be changed or deleted in the settings. */
+export const DEFAULT_STICKY_COMMANDS: StickyCommand[] = [
+	{ id: "highlight", name: "Highlight", before: "==", after: "==" },
+	{ id: "underline", name: "Underline", before: "<u>", after: "</u>" },
+	{ id: "bold", name: "Bold", before: "**", after: "**" },
+];
+
+export function newStickyCommandId(): string {
+	return "cmd-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
 
 export function emptyGiftState(): GiftState {
 	return { drawn: [], done: [], opened: false, recent: [], pendingRedraw: 0, openedTodayDate: "", openedTodayCount: 0 };
@@ -99,6 +111,7 @@ export function emptyStore(): StoreData {
 		spawned: {},
 		aliases: {},
 		dayTitles: {},
+		stickies: {},
 		lastSyncAt: null,
 		lastFullSyncAt: null,
 		gift: emptyGiftState(),

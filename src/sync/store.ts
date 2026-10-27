@@ -1,9 +1,11 @@
-import type { DayTitle, RecurrenceRule, StoreData, Task, TaskColor, TaskList } from "../types";
+import type { DayTitle, RecurrenceRule, StickyNote, StoreData, Task, TaskColor, TaskList } from "../types";
 import { nextOccurrence } from "../recurrence/rule";
 import { addDays, addMonths, today } from "../util/dates";
 
 /** Day headings older than this many days are dropped. */
 const KEEP_DAY_TITLES_DAYS = 60;
+/** Deleted sticky notes are forgotten after this many days (long enough for every device to see the deletion). */
+const KEEP_DELETED_STICKIES_DAYS = 60;
 /** How far ahead `removeDuplicates` looks for open tasks with the same title on the same day. */
 export const DUPLICATE_CHECK_MONTHS = 3;
 
@@ -145,6 +147,52 @@ export class TaskStore {
 		// Headings this device already dropped as old would otherwise come back with every merge.
 		this.pruneDayTitles();
 		return changed;
+	}
+
+	/** Sticky notes still on the board, oldest edit first (so the newest is drawn on top). */
+	stickyNotes(): [string, StickyNote][] {
+		return Object.entries(this.data.stickies)
+			.filter(([, n]) => !n.deleted)
+			.sort((a, b) => a[1].updated - b[1].updated);
+	}
+
+	addSticky(fields: Omit<StickyNote, "updated" | "deleted">): string {
+		const id = "sticky-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+		this.data.stickies[id] = { ...fields, updated: Date.now() };
+		return id;
+	}
+
+	updateSticky(id: string, patch: Partial<Omit<StickyNote, "updated" | "deleted">>): void {
+		const n = this.data.stickies[id];
+		if (!n || n.deleted) return;
+		this.data.stickies[id] = { ...n, ...patch, updated: Date.now() };
+	}
+
+	/** Keeps a deleted note for a while (without its text), so the deletion reaches the other devices. */
+	deleteSticky(id: string): void {
+		const n = this.data.stickies[id];
+		if (!n) return;
+		this.data.stickies[id] = { ...n, text: "", deleted: true, updated: Date.now() };
+		this.pruneStickies();
+	}
+
+	/** Takes over sticky notes from another device, per note the newer edit wins. Returns whether anything changed. */
+	mergeStickies(incoming: Record<string, StickyNote> | undefined): boolean {
+		if (!incoming || typeof incoming !== "object") return false;
+		let changed = false;
+		for (const [id, n] of Object.entries(incoming)) {
+			const mine = this.data.stickies[id];
+			if (!n || typeof n.updated !== "number" || (mine && mine.updated >= n.updated)) continue;
+			this.data.stickies[id] = n;
+			changed = true;
+		}
+		this.pruneStickies();
+		return changed;
+	}
+
+	private pruneStickies(): void {
+		const cutoff = Date.now() - KEEP_DELETED_STICKIES_DAYS * 86400000;
+		for (const [id, n] of Object.entries(this.data.stickies)) if (n.deleted && n.updated < cutoff) delete this.data.stickies[id];
 	}
 
 	private pruneDayTitles(): void {

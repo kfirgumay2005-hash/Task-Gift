@@ -174,9 +174,29 @@ export class TaskView extends ItemView {
 		const active = activeDocument.activeElement;
 		const typingIn = active instanceof HTMLInputElement && active.hasClass("tg-column-search-input") ? active : null;
 		const caret = typingIn ? [typingIn.selectionStart, typingIn.selectionEnd] : null;
+		// …or in a sticky note.
+		const stickyText = active instanceof HTMLTextAreaElement && active.hasClass("tg-sticky-text") ? active : null;
+		const stickyCaret = stickyText ? { start: stickyText.selectionStart, end: stickyText.selectionEnd, top: stickyText.scrollTop } : null;
+		const stickiesScroll = this.bodyEl.querySelector(".tg-stickies")?.scrollTop ?? 0;
+		const focusId = stickyText?.dataset.sticky ?? this.boardUi.focusSticky;
+		this.boardUi.focusSticky = focusId;
 
 		this.bodyEl.empty();
 		renderBoard(this.bodyEl, this.plugin, this.boardUi, (zoom) => void this.setZoom(zoom));
+
+		const stickies = this.bodyEl.querySelector(".tg-stickies");
+		if (stickies) stickies.scrollTop = stickiesScroll;
+		this.boardUi.focusSticky = undefined;
+		if (focusId) {
+			const text = this.bodyEl.querySelector<HTMLTextAreaElement>(`.tg-sticky-text[data-sticky="${CSS.escape(focusId)}"]`);
+			if (text) {
+				text.focus();
+				if (stickyCaret && focusId === stickyText?.dataset.sticky) {
+					text.setSelectionRange(stickyCaret.start, stickyCaret.end);
+					text.scrollTop = stickyCaret.top;
+				}
+			}
+		}
 
 		const next = this.bodyEl.querySelector(".tg-board");
 		if (next) next.scrollLeft = scrollLeft;
