@@ -120,3 +120,11 @@ not in the settings note (otherwise two devices write the settings note at once 
   on the Markdown (`stickyEditFor`); other commands run via `executeCommandById`.
   Test: `dev/ui-test/stickies.test.mjs`.
 - Board columns are folded with their eye button (`settings.collapsedColumns`); there is no "show completed" switch.
+- Paused tasks ("Pause" in a card's menu, or dropped on the column) are **deleted from Google** (so they leave the
+  phone's Google Tasks widget) and kept in `store.paused` (`{on, updated, task}`: title, notes, list, date, repeat,
+  time, color, modes, subtasks), merged per task by `updated` (resumed/deleted = `on: false` without `task`, so it
+  syncs). The board's "Paused" column (`store.pausedTasks()`, cards whose ID is the paused key) is first on the board
+  (stickies take the other end) and shown only while it has tasks. Dragging one to another column or "Resume" creates
+  it again as a new task (`store.resume`); a repeating one that fell behind starts at its next date from today.
+  `forget` must not drop `paused` (the sync forgets the deleted task). `migratePauses` converts the first version's
+  hide-only pauses.

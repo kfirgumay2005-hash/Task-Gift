@@ -181,6 +181,32 @@ export interface StickyNote {
 	deleted?: boolean;
 }
 
+/** A paused task as it was when it was deleted from Google, to be created again when it is resumed. */
+export interface PausedTask {
+	title: string;
+	notes: string;
+	listId: string;
+	due: string | null;
+	parent: string | null;
+	rule?: RecurrenceRule;
+	time?: string;
+	color?: TaskColor;
+	modes?: string[];
+	subtasks?: { title: string; notes: string; due: string | null; done: boolean }[];
+}
+
+/**
+ * A task on a break: deleted from Google (so it leaves every Google Tasks app) and kept here, shown in the board's
+ * Paused column until it is resumed as a new task.
+ */
+export interface PauseState {
+	/** false = resumed or deleted; kept a while without `task` so that syncs. */
+	on: boolean;
+	/** Date.now() of the last change; the newer one wins when two devices changed it. */
+	updated: number;
+	task?: PausedTask;
+}
+
 /** Where task colors are shown. */
 export type TaskColorScope = "both" | "board" | "calendar" | "off";
 
@@ -321,6 +347,8 @@ export interface StoreData {
 	dayTitles: Record<string, DayTitle>;
 	/** Sticky notes on the board, keyed by their own ID. A deleted one stays a while so the deletion syncs. */
 	stickies: Record<string, StickyNote>;
+	/** Paused tasks (the board's Paused column), keyed by the ID the task had. Resumed = kept a while with `on: false` so it syncs. */
+	paused: Record<string, PauseState>;
 	lastSyncAt: string | null;
 	lastFullSyncAt: string | null;
 	gift: GiftState;

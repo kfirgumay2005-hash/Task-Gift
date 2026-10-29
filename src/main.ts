@@ -100,6 +100,7 @@ export default class TaskGiftPlugin extends Plugin {
 		await this.loadPluginData();
 
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
+		this.store.migratePauses();
 		if (this.loadedTopics) this.mergeTopics(this.loadedTopics);
 		this.shownTopic = this.topicKey();
 		this.api = new TasksApi(() => this.accessToken());
@@ -318,6 +319,7 @@ export default class TaskGiftPlugin extends Plugin {
 		if (!store.taskModes || typeof store.taskModes !== "object") store.taskModes = {};
 		if (!store.dayTitles || typeof store.dayTitles !== "object") store.dayTitles = {};
 		if (!store.stickies || typeof store.stickies !== "object") store.stickies = {};
+		if (!store.paused || typeof store.paused !== "object") store.paused = {};
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
 		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
 		return store;
@@ -500,6 +502,7 @@ export default class TaskGiftPlugin extends Plugin {
 				d.times = { ...d.times, ...inc.times };
 				d.colors = { ...d.colors, ...inc.colors };
 				d.taskModes = { ...d.taskModes, ...inc.taskModes };
+				this.store.mergePaused(inc.paused);
 				d.spawned = { ...d.spawned, ...inc.spawned };
 				d.aliases = { ...d.aliases, ...inc.aliases };
 				// Devices on an older version still keep the topics only here.

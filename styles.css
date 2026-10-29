@@ -263,6 +263,14 @@
 	color: var(--color-green);
 }
 
+.tg-column.is-paused .tg-column-icon {
+	color: var(--color-orange);
+}
+
+.tg-column.is-paused .tg-card:not(:hover) {
+	opacity: 0.75;
+}
+
 .tg-column-title {
 	flex: 1;
 	overflow: hidden;

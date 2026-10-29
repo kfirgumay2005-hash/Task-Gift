@@ -1,4 +1,4 @@
-import type { DayTitle, RecurrenceRule, StickyNote, StoreData, Task, TaskColor, TaskList } from "../types";
+import type { DayTitle, PausedTask, PauseState, RecurrenceRule, StickyNote, StoreData, Task, TaskColor, TaskList } from "../types";
 import { nextOccurrence } from "../recurrence/rule";
 import { addDays, addMonths, today } from "../util/dates";
 
@@ -6,6 +6,8 @@ import { addDays, addMonths, today } from "../util/dates";
 const KEEP_DAY_TITLES_DAYS = 60;
 /** Deleted sticky notes are forgotten after this many days (long enough for every device to see the deletion). */
 const KEEP_DELETED_STICKIES_DAYS = 60;
+/** Resumed tasks' pause entries are forgotten after this many days. */
+const KEEP_RESUMED_DAYS = 60;
 /** How far ahead `removeDuplicates` looks for open tasks with the same title on the same day. */
 export const DUPLICATE_CHECK_MONTHS = 3;
 
@@ -93,12 +95,13 @@ export class TaskStore {
 		return this.lists()[0]?.id ?? null;
 	}
 
+	// Paused tasks are no task any more; their time, color and repeat come from what was kept when they were paused.
 	time(id: string): string | null {
-		return this.data.times[id] ?? null;
+		return this.data.times[id] ?? this.pausedTask(id)?.time ?? null;
 	}
 
 	color(id: string): TaskColor | null {
-		return this.data.colors[id] ?? null;
+		return this.data.colors[id] ?? this.pausedTask(id)?.color ?? null;
 	}
 
 	/** Mode IDs the task may be drawn in, or null for every mode. */
@@ -107,7 +110,128 @@ export class TaskStore {
 	}
 
 	rule(id: string): RecurrenceRule | null {
-		return this.data.recurrence[id] ?? null;
+		return this.data.recurrence[id] ?? this.pausedTask(id)?.rule ?? null;
+	}
+
+	/** Whether `id` is a paused task (in the Paused column). */
+	isPaused(id: string): boolean {
+		return !!this.data.paused[id]?.on;
+	}
+
+	private pausedTask(id: string): PausedTask | undefined {
+		const p = this.data.paused[id];
+		return p?.on ? p.task : undefined;
+	}
+
+	/** Paused tasks as cards for the Paused column; their ID is the key in `paused`, not a task in the store. */
+	pausedTasks(): Task[] {
+		return Object.entries(this.data.paused)
+			.filter(([, p]) => p.on && p.task)
+			.sort((a, b) => b[1].updated - a[1].updated)
+			.map(([id, p], i): Task => {
+				const k = p.task as PausedTask;
+				return {
+					id,
+					listId: k.listId,
+					title: k.title,
+					notes: k.notes,
+					due: k.due,
+					status: "needsAction",
+					completed: null,
+					parent: null,
+					position: String(i).padStart(6, "0"),
+					updated: "",
+					remoteListId: null,
+					remoteParent: null,
+					dirty: false,
+					localUpdated: p.updated,
+					pendingDelete: false,
+				};
+			});
+	}
+
+	/**
+	 * Pauses an open task: keeps everything about it (subtasks too) and deletes it, so it leaves Google Tasks
+	 * until it is resumed.
+	 */
+	pause(id: string): void {
+		const task = this.get(id);
+		if (!task || task.status === "completed") return;
+		const kept: PausedTask = { title: task.title, notes: task.notes, listId: task.listId, due: task.due, parent: task.parent };
+		const rule = this.data.recurrence[task.id];
+		if (rule) kept.rule = rule;
+		if (this.data.times[task.id]) kept.time = this.data.times[task.id];
+		if (this.data.colors[task.id]) kept.color = this.data.colors[task.id];
+		if (this.data.taskModes[task.id]) kept.modes = [...this.data.taskModes[task.id]];
+		const kids = this.children(task.id);
+		if (kids.length) kept.subtasks = kids.map((c) => ({ title: c.title, notes: c.notes, due: c.due, done: c.status === "completed" }));
+		this.data.paused[task.id] = { on: true, updated: Date.now(), task: kept };
+		this.prunePaused();
+		this.delete(task.id);
+	}
+
+	/**
+	 * Creates a paused task again, as a new task, and returns it. A repeating one that fell behind starts at its
+	 * next date from today.
+	 */
+	resume(id: string): Task | null {
+		const kept = this.pausedTask(id);
+		if (!kept) return null;
+		let due = kept.due;
+		let rule = kept.rule;
+		const t0 = today();
+		if (rule && due && due < t0) {
+			const next = nextOccurrence(rule, due, t0);
+			if (next) ({ due, rule } = next);
+		}
+		const parent = kept.parent && this.get(kept.parent) ? kept.parent : null;
+		const task = this.create({ title: kept.title, notes: kept.notes, listId: kept.listId, due, parent }, "local", true);
+		if (rule) this.data.recurrence[task.id] = rule;
+		if (kept.time) this.data.times[task.id] = kept.time;
+		if (kept.color) this.data.colors[task.id] = kept.color;
+		if (kept.modes?.length) this.data.taskModes[task.id] = [...kept.modes];
+		for (const c of kept.subtasks ?? []) {
+			this.create(
+				{ title: c.title, notes: c.notes, listId: kept.listId, due: c.due, parent: task.id, status: c.done ? "completed" : "needsAction" },
+				"local",
+				true,
+			);
+		}
+		this.data.paused[id] = { on: false, updated: Date.now() };
+		this.notify("local");
+		return task;
+	}
+
+	/** Deletes a paused task for good. */
+	deletePaused(id: string): void {
+		if (!this.isPaused(id)) return;
+		this.data.paused[id] = { on: false, updated: Date.now() };
+		this.notify("local");
+	}
+
+	/** Earlier pauses only hid the task; pause those properly (delete them from Google). */
+	migratePauses(): void {
+		for (const [id, p] of Object.entries(this.data.paused)) {
+			if (!p.on || p.task) continue;
+			if (this.get(id)) this.pause(id);
+			else this.data.paused[id] = { on: false, updated: Date.now() };
+		}
+	}
+
+	/** Takes over pauses from another device, per task the newer change wins. */
+	mergePaused(incoming: Record<string, PauseState> | undefined): void {
+		if (!incoming || typeof incoming !== "object") return;
+		for (const [id, p] of Object.entries(incoming)) {
+			const mine = this.data.paused[id];
+			if (!p || typeof p.updated !== "number" || (mine && mine.updated >= p.updated)) continue;
+			this.data.paused[id] = p;
+		}
+		this.prunePaused();
+	}
+
+	private prunePaused(): void {
+		const cutoff = Date.now() - KEEP_RESUMED_DAYS * 86400000;
+		for (const [id, p] of Object.entries(this.data.paused)) if (!p.on && p.updated < cutoff) delete this.data.paused[id];
 	}
 
 	/**
@@ -342,6 +466,7 @@ export class TaskStore {
 		moveKey(this.data.taskModes);
 		moveKey(this.data.spawned);
 		moveKey(this.data.snapshots);
+		moveKey(this.data.paused);
 		for (const [k, v] of Object.entries(this.data.spawned)) if (v === oldId) this.data.spawned[k] = newId;
 		const g = this.data.gift;
 		g.drawn = g.drawn.map((x) => (x === oldId ? newId : x));

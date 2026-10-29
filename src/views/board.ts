@@ -77,7 +77,27 @@ export function matchesQuery(t: Task, query: string): boolean {
 
 const SORT_LABELS: Record<BoardSort, string> = { default: "Default order", dateAsc: "Date: oldest first", dateDesc: "Date: newest first" };
 
-function buildColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
+/**
+ * Paused tasks (deleted from Google, kept by the store) get their own column at the start of the board (the sticky
+ * notes take the other end), shown only while it has tasks. Dropping a task on it pauses it; dropping a paused task on
+ * another column creates it again there (`addDropTarget`).
+ */
+function buildColumns(plugin: TaskGiftPlugin, all: Task[]): Column[] {
+	const store = plugin.store;
+	const paused: Column = {
+		key: "paused",
+		title: "Paused",
+		icon: "pause-circle",
+		tasks: store.pausedTasks(),
+		onDrop: (t) => store.pause(t.id),
+		accent: "paused",
+	};
+	// A task paused on another device can still be here until the next sync deletes it.
+	const cols = buildTaskColumns(plugin, all.filter((t) => !store.isPaused(t.id)));
+	return paused.tasks.length ? [paused, ...cols] : cols;
+}
+
+function buildTaskColumns(plugin: TaskGiftPlugin, tasks: Task[]): Column[] {
 	const s = plugin.settings;
 	const store = plugin.store;
 	const t0 = today();
@@ -365,7 +385,7 @@ function renderColumn(board: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSta
 		const shown = col.tasks.filter((t) => matchesQuery(t, query)).sort(comparator(sort));
 		list.empty();
 		for (const t of shown) {
-			renderCard(list, plugin, t, { showList: settings.grouping !== "list", draggable: true, checkbox: true, colorIn: "board" });
+			renderCard(list, plugin, t, { showList: settings.grouping !== "list", draggable: true, checkbox: col.key !== "paused", colorIn: "board" });
 		}
 		if (!shown.length) list.createDiv({ cls: "tg-column-empty", text: searching ? "No matches" : col.onDrop ? "Drop tasks here" : "Nothing here" });
 		const open = shown.filter((t) => t.status !== "completed").length;
@@ -429,10 +449,18 @@ function addDropTarget(colEl: HTMLElement, plugin: TaskGiftPlugin, col: Column):
 			e.preventDefault();
 			colEl.removeClass("is-drop-target");
 			const id = e.dataTransfer?.getData("text/x-task-gift");
-			const task = id ? plugin.store.get(id) : undefined;
+			if (!id) return;
+			if (plugin.store.isPaused(id) && !plugin.store.get(id)) {
+				// Created again as a new task, then placed like any task dropped here.
+				if (col.key === "paused") return;
+				const resumed = plugin.store.resume(id);
+				if (resumed) onDrop(resumed);
+				return;
+			}
+			const task = plugin.store.get(id);
 			if (!task) return;
 			if (col.tasks.some((t) => t.id === task.id)) return;
-			if (task.parent && settings.grouping === "list") new Notice("Subtask moved to the other list as a top-level task.");
+			if (task.parent && settings.grouping === "list" && col.key !== "paused") new Notice("Subtask moved to the other list as a top-level task.");
 			onDrop(task);
 		});
 	}

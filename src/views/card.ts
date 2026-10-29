@@ -39,6 +39,23 @@ export function openCardMenu(e: MouseEvent, plugin: TaskGiftPlugin, task: Task):
 	const done = task.status === "completed";
 	const t0 = today();
 	const menu = new Menu();
+	if (store.isPaused(task.id) && !store.get(task.id)) {
+		menu.addItem((i) => i.setTitle("Resume").setIcon("play-circle").onClick(() => store.resume(task.id)));
+		menu.addSeparator();
+		menu.addItem((i) =>
+			i
+				.setTitle("Delete")
+				.setIcon("trash-2")
+				.setWarning(true)
+				.onClick(() =>
+					new ConfirmModal(plugin.app, "Delete paused task?", `"${task.title}" will be gone for good.`, "Delete", () =>
+						store.deletePaused(task.id),
+					).open(),
+				),
+		);
+		menu.showAtMouseEvent(e);
+		return;
+	}
 	menu.addItem((i) =>
 		i
 			.setTitle(done ? "Mark as not done" : "Mark as done")
@@ -46,6 +63,7 @@ export function openCardMenu(e: MouseEvent, plugin: TaskGiftPlugin, task: Task):
 			.onClick(() => store.setCompleted(task.id, !done)),
 	);
 	menu.addItem((i) => i.setTitle("Edit…").setIcon("pencil").onClick(() => plugin.openTaskModal(task)));
+	if (!done) menu.addItem((i) => i.setTitle("Pause").setIcon("pause-circle").onClick(() => store.pause(task.id)));
 	menu.addSeparator();
 	const due = (title: string, icon: string, value: string | null) =>
 		menu.addItem((i) =>
@@ -147,7 +165,8 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	const label = dueLabel(plugin, { ...task, due });
 	if (label && due) {
 		const chip = meta.createSpan({ cls: "tg-meta" });
-		if (!done && !upcoming && due < today()) chip.addClass("is-overdue");
+		// A paused task isn't late: it waits for its break to end.
+		if (!done && !upcoming && due < today() && !store.isPaused(task.id)) chip.addClass("is-overdue");
 		else if (due === today()) chip.addClass("is-today");
 		setIcon(chip.createSpan({ cls: "tg-meta-icon" }), "calendar");
 		chip.createSpan({ text: label });
@@ -179,7 +198,10 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	}
 	if (!meta.childElementCount) meta.remove();
 
-	body.addEventListener("click", () => plugin.openTaskModal(task));
+	// A paused task has nothing to edit; it is resumed from its menu or by dragging it to another column.
+	body.addEventListener("click", () => {
+		if (store.get(task.id)) plugin.openTaskModal(task);
+	});
 
 	if (opts.menu !== false && !upcoming) {
 		const moreBtn = card.createEl("button", { cls: "clickable-icon tg-card-more", attr: { "aria-label": "Task actions" } });

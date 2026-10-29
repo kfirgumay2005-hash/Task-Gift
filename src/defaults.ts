@@ -112,6 +112,7 @@ export function emptyStore(): StoreData {
 		aliases: {},
 		dayTitles: {},
 		stickies: {},
+		paused: {},
 		lastSyncAt: null,
 		lastFullSyncAt: null,
 		gift: emptyGiftState(),
