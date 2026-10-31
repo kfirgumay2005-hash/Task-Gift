@@ -4,7 +4,7 @@ import { CalendarEntry, moveEntry, stepEntry, timeLabel } from "../calendars/for
 import { checklistCount, renderNotes, toggleCheck } from "../calendars/notes";
 import type { ExtraCalendar } from "../calendars/store";
 import { taskColorCss } from "../defaults";
-import { CalendarEditModal, CalendarEntryModal, CalendarImportModal } from "../modals/CalendarModals";
+import { CalendarEditModal, CalendarEntryModal, CalendarImportModal, confirmDeleteCalendar } from "../modals/CalendarModals";
 import type { CalendarRange, Task } from "../types";
 import { describeRule, occurrencesBetween } from "../recurrence/rule";
 import { addDays, addMonths, daysInMonth, MONTH_SHORT, parseDate, startOfWeek, today, toDateString, WEEKDAY_SHORT } from "../util/dates";
@@ -223,6 +223,18 @@ function renderCalendarPicker(bar: HTMLElement, plugin: TaskGiftPlugin, ui: Cale
 		if (extra) {
 			menu.addItem((i) => i.setTitle("Edit calendar…").setIcon("pencil").onClick(() => new CalendarEditModal(plugin.app, plugin.calendars, extra, show).open()));
 			menu.addItem((i) => i.setTitle("Open its note").setIcon("file-text").onClick(() => void plugin.app.workspace.openLinkText(extra.path, "", "tab")));
+		}
+		// The shown calendar, or from the tasks any of them. The Tasks calendar itself can't be deleted.
+		const deletable = extra ? [extra] : plugin.calendars.all();
+		if (deletable.length) menu.addSeparator();
+		for (const cal of deletable) {
+			menu.addItem((i) =>
+				i
+					.setTitle(`Delete "${cal.name}"…`)
+					.setIcon("trash")
+					.setWarning(true)
+					.onClick(() => confirmDeleteCalendar(plugin.app, plugin.calendars, cal, () => show(null))),
+			);
 		}
 		menu.showAtMouseEvent(e);
 	});

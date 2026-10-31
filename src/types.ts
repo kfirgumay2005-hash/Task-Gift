@@ -145,7 +145,7 @@ export interface DayTitleStyle {
 	highlight: boolean;
 }
 
-/** The heading's end date shown next to it, after the user's own words (e.g. "Ends" or "עד"). */
+/** The heading's end date shown next to it, after the user's own words (e.g. "Ends"). */
 export interface DayTitleEndNote extends DayTitleStyle {
 	shown: boolean;
 	text: string;

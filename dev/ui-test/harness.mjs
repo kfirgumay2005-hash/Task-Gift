@@ -13,7 +13,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function openPage(pageFile, { port = 9334 } = {}) {
 	const out = join(here, "out");
-	rmSync(out, { recursive: true, force: true });
+	// Retries: the previous test's Chrome may still hold the folder for a moment.
+	rmSync(out, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 	mkdirSync(out, { recursive: true });
 	await esbuild.build({ entryPoints: [pageFile], bundle: true, format: "iife", outfile: join(out, "page.js"), alias: { obsidian: join(here, "obsidian-shim.js") }, loader: { ".mp3": "empty" }, logLevel: "error" });
 	// Obsidian's color variables, which the plugin's CSS uses.

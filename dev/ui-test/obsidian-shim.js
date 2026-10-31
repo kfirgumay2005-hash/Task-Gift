@@ -22,6 +22,7 @@ P.addClass = function (c) { this.classList.add(c); };
 P.removeClass = function (c) { this.classList.remove(c); };
 P.toggleClass = function (c, b) { this.classList.toggle(c, b); };
 P.hasClass = function (c) { return this.classList.contains(c); };
+P.setAttr = function (k, v) { this.setAttribute(k, v); };
 Object.defineProperty(Node.prototype, "doc", { get() { return this.ownerDocument; } });
 Object.defineProperty(Node.prototype, "win", { get() { return this.ownerDocument.defaultView; } });
 window.activeDocument = document;
@@ -30,13 +31,15 @@ window.activeWindow = window;
 export function setIcon(el) { el.textContent = "Ø"; }
 export function getIcon() { return document.createElement("span"); }
 export const Platform = { isMobile: false, isDesktop: true };
+export class TFile {}
+export const normalizePath = (p) => p;
 export class Notice { constructor(msg) { (window.notices ??= []).push(msg); } }
 class MenuItem {
 	setTitle(t) { this.title = t; return this; }
 	setIcon() { return this; }
 	setChecked(c) { this.checked = c; return this; }
 	setSection(s) { this.section = s; return this; }
-	setWarning() { return this; }
+	setWarning(w) { this.warning = w; return this; }
 	onClick(f) { this.click = f; return this; }
 }
 /** Records its items; the test picks one with `window.lastMenu.find((i) => i.title === "…").click()`. */

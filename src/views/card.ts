@@ -143,7 +143,7 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 	}
 
 	const body = card.createDiv({ cls: "tg-card-body" });
-	// dir="auto": a Hebrew / Arabic title starting with a number ("50 מילים") keeps its word order.
+	// dir="auto": an RTL title starting with a number keeps its word order.
 	body.createDiv({ cls: "tg-card-title", text: task.title || "(untitled)", attr: { dir: "auto" } });
 
 	if (task.parent) {

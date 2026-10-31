@@ -100,17 +100,19 @@ not in the settings note (otherwise two devices write the settings note at once 
 - The header search also lists the next `UPCOMING_REPEATS` (3) occurrences of each open repeating task, computed
   like the calendar's ghosts (`renderCard` with `upcoming`: no checkbox/menu, clicking edits the real task).
 - Modes only affect gifts; the board always shows every task. Each mode owns its own sounds, victory and music.
-- User-entered text (titles, notes, list and mode names) gets `dir="auto"` so Hebrew mixed with numbers keeps
+- User-entered text (titles, notes, list and mode names) gets `dir="auto"` so RTL text mixed with numbers keeps
   its order.
 - Extra calendars (e.g. shifts) never touch Google: one note each in `Calendars/` next to the data note, written in
   the same text format the import parses (`src/calendars/format.ts`), so they sync per file and can be edited by hand.
+  Deleted from the calendar picker's menu (`confirmDeleteCalendar`, note goes to the trash); the Tasks calendar can't be.
+  Test: `dev/ui-test/calendar-delete.test.mjs`.
 - Within a day, extra-calendar entries keep the order of their note (`sortByDay` sorts by date only); dragging an
   entry or "Move up/down" in its context menu rewrites that order. New entries are placed by time (`insertEntry`).
 - The day's topic in the view header is per date in the data note's store (`dayTitles`), merged across devices by
   `updated` (newest wins); a cleared one is kept with empty text so the clearing syncs. Its `until` sets how long
   it lasts (missing = that day only, null = never ends; `untilTime` HH:MM ends it at that time of the `until` day); the header shows the newest one still lasting
   (`store.activeDayTitle`), and a lasting topic is edited under the date it was written for. `endNote` shows the
-  end date next to it (below/above/left/right) with the user's words and its own style; Hebrew words → RTL; the date is
+  end date next to it (below/above/left/right) with the user's words and its own style; RTL words → RTL direction; the date is
   DD/MM/YYYY. Both texts use `LetterColorField` in `DayTitleModal.ts` for per-letter colors.
 - Description templates of calendar entries are notes too, in `Templates/` next to the data note
   (`src/calendars/templates.ts`), read only when the Templates menu opens. Lines ending with ":" and `___` are

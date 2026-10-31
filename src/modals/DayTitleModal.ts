@@ -17,7 +17,8 @@ export const DEFAULT_DAY_TITLE: DayTitleFields = { text: "", color: null, size: 
 
 const DEFAULT_END_NOTE: DayTitleEndNote = { shown: false, text: "", color: null, size: "small", bold: false, italic: false, highlight: false, position: "below" };
 
-const HEBREW = /[֐-׿]/;
+/** Letters of the right-to-left scripts. */
+const RTL = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
 
 /** Text whose letters can have their own colors: the heading and the end date's words. */
 interface ColoredText {
@@ -27,7 +28,7 @@ interface ColoredText {
 	color: TaskColor | null;
 }
 
-/** The end date as DD/MM/YYYY ("2026-11-05" → "05/11/2026"), with its time if any; the same after Hebrew or English words. */
+/** The end date as DD/MM/YYYY ("2026-11-05" → "05/11/2026"), with its time if any; the same after RTL or LTR words. */
 function endDateText(date: string, time?: string): string {
 	const [y, m, d] = date.split("-");
 	return time ? `${d}/${m}/${y} ${time}` : `${d}/${m}/${y}`;
@@ -74,7 +75,7 @@ export function renderDayTitle(el: HTMLElement, t: DayTitleFields, placeholder =
 
 /**
  * Draws the heading's end date with its words into `el`, or hides `el` when the heading has none to show.
- * Its direction follows the words: Hebrew reads right to left with the date on the left, English the other way.
+ * Its direction follows the words: RTL words have the date on their left, LTR words on their right.
  * `group` holds the heading and `el`; it stacks them when the end date goes below or above.
  */
 export function renderDayTitleEnd(group: HTMLElement, el: HTMLElement, t: DayTitleFields): void {
@@ -91,7 +92,7 @@ export function renderDayTitleEnd(group: HTMLElement, el: HTMLElement, t: DayTit
 	group.toggleClass("is-stacked", position === "below" || position === "above");
 	const lead = note.text.length - note.text.trimStart().length;
 	const words = note.text.trim();
-	el.setAttribute("dir", HEBREW.test(words) ? "rtl" : "ltr");
+	el.setAttribute("dir", RTL.test(words) ? "rtl" : "ltr");
 	const text = el.createSpan({ cls: "tg-day-title-text" });
 	if (words) {
 		renderParts(text, trimRuns(partsOf(note), lead, words.length));
@@ -377,8 +378,8 @@ export class DayTitleModal extends Modal {
 		const noteBox = contentEl.createDiv({ cls: "tg-day-title-end-settings" });
 		this.noteField.build(noteBox, {
 			name: "Words before the date",
-			desc: "Hebrew words put the date on their left, English ones on their right. Select letters to color only them.",
-			placeholder: "e.g. Ends / עד",
+			desc: "RTL words put the date on their left, LTR words on their right. Select letters to color only them.",
+			placeholder: "e.g. Ends",
 			cls: "tg-day-title-end-input",
 			onEnter: () => this.save(),
 		});

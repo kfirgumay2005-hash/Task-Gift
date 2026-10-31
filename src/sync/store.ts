@@ -6,7 +6,7 @@ import { addDays, addMonths, today } from "../util/dates";
 const KEEP_DAY_TITLES_DAYS = 60;
 /** Cleared reminders, and those of a task that is gone, are forgotten after this many days. */
 const KEEP_CLEARED_REMINDERS_DAYS = 60;
-/** Starts a reminder's title. An emoji, not a word: it adds no language to a Hebrew title, and shows in every Google Tasks app. */
+/** Starts a reminder's title. An emoji, not a word: it adds no language to the title, and shows in every Google Tasks app. */
 const REMINDER_PREFIX = "🔔 ";
 /** Deleted sticky notes are forgotten after this many days (long enough for every device to see the deletion). */
 const KEEP_DELETED_STICKIES_DAYS = 60;

@@ -61,12 +61,12 @@ try {
 	await page.click(...(await page.center(".tg-day-title-end-settings input[type=text]")));
 	await page.type("עד");
 	await page.sleep(100);
-	const he = await endEl();
-	check("Hebrew words: right-to-left, date as DD/MM/YYYY", he?.dir === "rtl" && he?.text === "עד 05/11/2099", he);
+	const rtl = await endEl();
+	check("RTL words: right-to-left, date as DD/MM/YYYY", rtl?.dir === "rtl" && rtl?.text === "עד 05/11/2099", rtl);
 	await page.ev(`(()=>{const i=document.querySelector('.tg-day-title-end-settings input[type=text]');i.value='Ends';i.dispatchEvent(new Event('input'))})()`);
 	await page.ev(`(()=>{const s=document.querySelector('.tg-day-title-end-settings select[aria-label="End date size"]');s.value='huge';s.dispatchEvent(new Event('change'))})()`);
-	const en = await endEl();
-	check("English words: left-to-right, own size", en?.dir === "ltr" && en?.text === "Ends 05/11/2099" && en?.size.includes("is-huge"), en);
+	const ltr = await endEl();
+	check("LTR words: left-to-right, own size", ltr?.dir === "ltr" && ltr?.text === "Ends 05/11/2099" && ltr?.size.includes("is-huge"), ltr);
 	const timeShown = () => page.ev(`getComputedStyle(document.querySelector('.tg-day-title-until-time')).display !== 'none'`);
 	check("end time shown for 'On a date'", await timeShown(), await timeShown());
 	await page.click(...(await page.center(".tg-day-title-until-time")));

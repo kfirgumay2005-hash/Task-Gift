@@ -42,6 +42,17 @@ function renderSwatches(parent: HTMLElement, current: () => TaskColor | null, on
 	draw();
 }
 
+/** Asks first, then moves the calendar's note to the trash. */
+export function confirmDeleteCalendar(app: App, calendars: CalendarStore, cal: ExtraCalendar, onDeleted: () => void): void {
+	new ConfirmModal(
+		app,
+		"Delete calendar?",
+		`"${cal.name}" and its ${cal.entries.length} entr${cal.entries.length === 1 ? "y" : "ies"} go to the trash (its note can be restored from there).`,
+		"Delete",
+		() => void calendars.remove(cal).then(onDeleted),
+	).open();
+}
+
 /** Creates a calendar, or renames / recolors / deletes one. */
 export class CalendarEditModal extends Modal {
 	private name: string;
@@ -108,17 +119,10 @@ export class CalendarEditModal extends Modal {
 	private remove(): void {
 		const cal = this.existing;
 		if (!cal) return;
-		new ConfirmModal(
-			this.app,
-			"Delete calendar?",
-			`"${cal.name}" and its ${cal.entries.length} entr${cal.entries.length === 1 ? "y" : "ies"} go to the trash (its note can be restored from there).`,
-			"Delete",
-			() =>
-				void this.calendars.remove(cal).then(() => {
-					this.close();
-					this.onDone(null);
-				}),
-		).open();
+		confirmDeleteCalendar(this.app, this.calendars, cal, () => {
+			this.close();
+			this.onDone(null);
+		});
 	}
 
 	onClose(): void {
