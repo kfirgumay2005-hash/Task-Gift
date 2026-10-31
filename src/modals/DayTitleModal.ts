@@ -1,7 +1,8 @@
-import { App, Modal, Setting, setIcon } from "obsidian";
+import { App, Modal, Notice, Setting, setIcon } from "obsidian";
 import { TASK_COLORS, taskColorCss } from "../defaults";
 import type { DayTitle, DayTitleEndNote, DayTitleEndPosition, DayTitlePart, DayTitleSize, DayTitleStyle, NamedTaskColor, TaskColor } from "../types";
 import { addDays, shortDate, today } from "../util/dates";
+import { DateField, INVALID_TIME, TimeField } from "./dateFields";
 
 const SIZE_LABELS: Record<DayTitleSize, string> = { small: "Small", normal: "Normal", large: "Large", huge: "Huge" };
 
@@ -276,6 +277,7 @@ export class DayTitleModal extends Modal {
 	private note: DayTitleEndNote;
 	private titleField: LetterColorField;
 	private noteField: LetterColorField;
+	private untilTimeField: TimeField | null = null;
 	private redraw: () => void = () => {};
 
 	constructor(
@@ -327,23 +329,33 @@ export class DayTitleModal extends Modal {
 		// A past day can't be the last one: the earliest is today (or the topic's own day, when that is later).
 		// Read at the time of use, so a modal left open past midnight moves on too.
 		const firstDay = () => (today() > this.date ? today() : this.date);
-		const until = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until", attr: { type: "date", min: firstDay(), "aria-label": "Last day" } });
 		const stored = typeof this.draft.until === "string" ? this.draft.until : addDays(firstDay(), 7);
-		until.value = stored < firstDay() ? firstDay() : stored;
-		for (const ev of ["focus", "pointerdown"]) until.addEventListener(ev, () => (until.min = firstDay()));
+		const until = new DateField(ends.controlEl, {
+			value: stored < firstDay() ? firstDay() : stored,
+			label: "Last day",
+			cls: "tg-day-title-until",
+			min: firstDay,
+			panelParent: ends.settingEl,
+			onChange: () => readEnd(endChoice),
+		});
 		// Empty = at the end of that day.
-		const untilTime = ends.controlEl.createEl("input", { cls: "tg-input tg-day-title-until-time", attr: { type: "time", "aria-label": "End time" } });
-		untilTime.value = this.draft.untilTime ?? "";
+		const untilTime = (this.untilTimeField = new TimeField(ends.controlEl, {
+			value: this.draft.untilTime ?? "",
+			label: "End time",
+			cls: "tg-day-title-until-time",
+			onChange: () => readEnd(endChoice),
+		}));
 		const end: DayTitleEnd = this.draft.until === null ? "never" : this.draft.until ? "date" : "day";
 		const note = this.note;
 		const showUntil = (e: DayTitleEnd) => {
-			until.toggleClass("tg-day-title-off", e !== "date");
-			untilTime.toggleClass("tg-day-title-off", e !== "date");
+			until.el.toggleClass("tg-day-title-off", e !== "date");
+			if (e !== "date") until.close();
+			untilTime.el.toggleClass("tg-day-title-off", e !== "date");
 			showNote.settingEl.toggleClass("tg-day-title-off", e !== "date");
 			noteBox.toggleClass("tg-day-title-off", e !== "date" || !note.shown);
 		};
 		const readEnd = (e: DayTitleEnd) => {
-			// A typed date gets past `min`; lift it to the first allowed day.
+			// A date picked before midnight can be past by now; lift it to the first allowed day.
 			if (until.value && until.value < firstDay()) until.value = firstDay();
 			this.draft.until = e === "never" ? null : e === "date" && until.value ? until.value : undefined;
 			this.draft.untilTime = typeof this.draft.until === "string" && untilTime.value ? untilTime.value : undefined;
@@ -384,10 +396,8 @@ export class DayTitleModal extends Modal {
 			for (const [k, label] of Object.entries(END_LABELS)) d.addOption(k, label);
 			d.setValue(end).onChange((v) => readEnd((endChoice = v as DayTitleEnd)));
 		});
-		ends.controlEl.appendChild(until);
-		ends.controlEl.appendChild(untilTime);
-		until.addEventListener("change", () => readEnd(endChoice));
-		untilTime.addEventListener("change", () => readEnd(endChoice));
+		ends.controlEl.appendChild(until.el);
+		ends.controlEl.appendChild(untilTime.el);
 		showUntil(end);
 		redraw();
 
@@ -428,6 +438,10 @@ export class DayTitleModal extends Modal {
 	}
 
 	private save(clear = false): void {
+		if (!clear && typeof this.draft.until === "string" && this.untilTimeField?.isValid === false) {
+			new Notice(INVALID_TIME);
+			return;
+		}
 		const title = clear ? { text: "", parts: undefined } : this.titleField.trimmed();
 		// An end before the start, or at the end of the start day itself, is the same as "At the end of the day".
 		const d = this.draft.until;

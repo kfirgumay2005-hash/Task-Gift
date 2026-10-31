@@ -67,6 +67,31 @@ export interface RecurrenceRule {
 	anchor: string;
 }
 
+export type ReminderUnit = "days" | "weeks" | "months";
+
+/** How long before its task a reminder falls. */
+export interface ReminderOffset {
+	amount: number;
+	unit: ReminderUnit;
+	/** This reminder's own text, shown in its description above the due date. */
+	text?: string;
+}
+
+/** A reminder set on a task, and the separate task created for it. */
+export interface Reminder extends ReminderOffset {
+	/** The reminder's task. It may be gone: deleted by hand, or pruned once completed. */
+	taskId?: string;
+	/** The date worked out from the task when the reminder was last placed; unset = none placed (no open dated task). */
+	date?: string;
+}
+
+/** The reminders set on a task. Cleared = kept a while with no rules, so that syncs. */
+export interface TaskReminders {
+	rules: Reminder[];
+	/** Date.now() of the last change; the newer one wins when two devices changed it. */
+	updated: number;
+}
+
 export type DatePreset =
 	| "all"
 	| "yesterday"
@@ -192,6 +217,7 @@ export interface PausedTask {
 	time?: string;
 	color?: TaskColor;
 	modes?: string[];
+	reminders?: ReminderOffset[];
 	subtasks?: { title: string; notes: string; due: string | null; done: boolean }[];
 }
 
@@ -339,6 +365,8 @@ export interface StoreData {
 	colors: Record<string, TaskColor>;
 	/** Modes a task may be drawn in, keyed by task ID. Missing = every mode. */
 	taskModes: Record<string, string[]>;
+	/** Reminders set on a task, keyed by that task's ID (not the reminder tasks'). */
+	reminders: Record<string, TaskReminders>;
 	/** Task IDs that already spawned their next occurrence. */
 	spawned: Record<string, string>;
 	/** Temporary local IDs that were replaced by Google IDs (old -> new). */

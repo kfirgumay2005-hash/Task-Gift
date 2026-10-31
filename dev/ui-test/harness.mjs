@@ -58,11 +58,20 @@ export async function openPage(pageFile, { port = 9334 } = {}) {
 		/** Center of the first element matching `selector` (or the n-th with `n`). */
 		center: (selector, n = 0) => ev(`(()=>{const b=document.querySelectorAll(${JSON.stringify(selector)})[${n}].getBoundingClientRect();return [b.x+b.width/2,b.y+b.height/2]})()`),
 		type: async (text) => { for (const ch of text) await cmd("Input.insertText", { text: ch }); },
+		/** Real key presses, for fields that ignore inserted text (native date and time inputs). */
+		keys: async (text) => {
+			for (const ch of text) {
+				await cmd("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch });
+				await cmd("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
+			}
+		},
 		/** A key press; modifiers: 1 Alt, 2 Ctrl, 4 Meta, 8 Shift. */
 		key: async (key, vk, modifiers = 0) => {
 			await cmd("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code: key, windowsVirtualKeyCode: vk, modifiers });
 			await cmd("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: vk, modifiers });
 		},
+		/** Saves what the page looks like as a PNG. */
+		screenshot: async (file) => writeFileSync(file, Buffer.from((await cmd("Page.captureScreenshot", { format: "png" })).result.data, "base64")),
 		/** Uncaught errors the page reported (the page module should collect them in window.errors). */
 		errors: () => ev("window.errors ?? []"),
 		close: () => { ws.close(); chrome.kill(); },

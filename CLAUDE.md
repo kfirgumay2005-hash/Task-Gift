@@ -37,6 +37,10 @@ contenteditable) instead of the real one: a method named `selection()` in the mo
   behavior, not Obsidian's own scripts or theme; keep the shim's Modal fields in step with the real ones (the list
   above), otherwise clashes stay hidden. Obsidian's code can be read from `%APPDATA%/obsidian/obsidian-*.asar`
   (plain asar archive; `app.js`, `app.css`) to check what a class really does.
+- Don't use native `type="time"` / `type="date"` inputs; use `TimeField` / `DateField` (`src/modals/dateFields.ts`).
+  On an en-US computer the native time field shows "02:30 --" but its value stays empty until AM/PM is set, so times
+  were dropped on save without a sound (the data note had 0 `times`). A value that isn't valid must stop the save
+  (`isValid`), not vanish.
 - Obsidian's / themes' `button` styles beat the plugin's CSS: use a `div role="button"` when an element needs its
   own colors or background.
 - To confirm the user ran the new build: the data note shows what was saved and when (`updated`), compare with the
@@ -119,6 +123,14 @@ not in the settings note (otherwise two devices write the settings note at once 
   Obsidian's editor commands can't reach the sticky textarea, so `src/stickyCommands.ts` redoes the formatting ones
   on the Markdown (`stickyEditFor`); other commands run via `executeCommandById`.
   Test: `dev/ui-test/stickies.test.mjs`.
+- Reminders (up to `MAX_REMINDERS`, days/weeks/months before a task, set in `TaskModal`) are real separate tasks in
+  Google, titled `🔔 <title>`. `store.reminders` is keyed by the main task (`{rules, updated}`, merged per task by
+  `updated`, cleared = empty `rules`); each rule keeps its `taskId` and the `date` last placed. `store.syncReminders`
+  (after `update`, `setCompleted`, `resume` and every pull) acts only when the worked-out date differs from `date`, so
+  reminders deleted, completed or dragged by hand stay that way until the task itself moves. Title, list, time, color and
+  modes are copied from the main task every time, and the description is the rule's own `text` plus a "Due" line, so
+  editing a reminder opens the main task (`openTaskModal`), where each reminder has its own text field. Keep
+  `dropReminders` in `delete`/`forget`; `pause` keeps only the offsets. Test: `dev/ui-test/reminders.test.mjs`.
 - Board columns are folded with their eye button (`settings.collapsedColumns`); there is no "show completed" switch.
 - Paused tasks ("Pause" in a card's menu, or dropped on the column) are **deleted from Google** (so they leave the
   phone's Google Tasks widget) and kept in `store.paused` (`{on, updated, task}`: title, notes, list, date, repeat,

@@ -13,6 +13,7 @@ An Obsidian plugin that syncs your **Google Tasks** both ways and shows them eit
 - **Daily note**: add today's tasks to your daily note as a checklist, with descriptions under the tasks (optional, off by default).
 - **Gift mode**: a wrapped box that reveals 1–5 random tasks, with "Done" and "Draw again" buttons. The current draw survives restarts.
 - **Task modal**: title, notes, list, date, time, and Google-Calendar-style recurrence.
+- **Reminders**: up to 3 per task, each a separate task (🔔 and the title) days, weeks or months before it, also in Google Tasks. They follow their task when it moves, and go when it is completed or deleted.
 - **Modes** (e.g. *Home*, *Work*): each mode has its own date ranges (Yesterday, Today, Tomorrow, This week, Next 7 days, Overdue, No due date, custom range, combined as you like), task lists, excluded words, backgrounds, gift sound, victory and music. Exactly one mode is active; switch it from the mode button in the view header.
 
 ## Installation (from source)

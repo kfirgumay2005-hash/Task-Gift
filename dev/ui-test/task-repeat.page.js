@@ -12,6 +12,7 @@ const store = {
 	color: () => null,
 	modes: () => null,
 	rule: () => null,
+	reminders: () => [],
 	update: (id, edit) => window.updates.push({ id, ...edit }),
 	create: () => task,
 	notify: () => {},

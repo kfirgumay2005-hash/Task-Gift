@@ -46,6 +46,9 @@ export function taskColorCss(color: TaskColor): string {
 	return color in TASK_COLORS ? `var(--color-${color})` : color;
 }
 
+/** Reminders a task can have. */
+export const MAX_REMINDERS = 3;
+
 /** "Keep completed tasks" value meaning no time limit. */
 export const KEEP_FOREVER = -1;
 /** The shortest sync interval: all devices share one Google quota (~50,000 requests a day; 3 devices × 2 requests every 15 s ≈ 35,000). */
@@ -108,6 +111,7 @@ export function emptyStore(): StoreData {
 		times: {},
 		colors: {},
 		taskModes: {},
+		reminders: {},
 		spawned: {},
 		aliases: {},
 		dayTitles: {},

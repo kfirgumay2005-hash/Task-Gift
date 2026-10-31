@@ -1,9 +1,13 @@
-import type { DayTitle, PausedTask, PauseState, RecurrenceRule, StickyNote, StoreData, Task, TaskColor, TaskList } from "../types";
-import { nextOccurrence } from "../recurrence/rule";
+import type { DayTitle, PausedTask, PauseState, RecurrenceRule, Reminder, ReminderOffset, StickyNote, StoreData, Task, TaskColor, TaskList, TaskReminders } from "../types";
+import { nextOccurrence, reminderDate } from "../recurrence/rule";
 import { addDays, addMonths, today } from "../util/dates";
 
 /** Day headings older than this many days are dropped. */
 const KEEP_DAY_TITLES_DAYS = 60;
+/** Cleared reminders, and those of a task that is gone, are forgotten after this many days. */
+const KEEP_CLEARED_REMINDERS_DAYS = 60;
+/** Starts a reminder's title. An emoji, not a word: it adds no language to a Hebrew title, and shows in every Google Tasks app. */
+const REMINDER_PREFIX = "🔔 ";
 /** Deleted sticky notes are forgotten after this many days (long enough for every device to see the deletion). */
 const KEEP_DELETED_STICKIES_DAYS = 60;
 /** Resumed tasks' pause entries are forgotten after this many days. */
@@ -18,6 +22,11 @@ function dayTitleLasts(start: string, t: DayTitle, date: string, time?: string):
 	const last = t.until ?? start;
 	if (date === last && time && typeof t.until === "string" && t.untilTime) return time < t.untilTime;
 	return date <= last;
+}
+
+/** What the user set on a reminder, without where it was placed. */
+function offsetOf(r: ReminderOffset): ReminderOffset {
+	return { amount: r.amount, unit: r.unit, ...(r.text ? { text: r.text } : {}) };
 }
 
 export const LOCAL_PREFIX = "local-";
@@ -52,6 +61,8 @@ export interface TaskEdit {
 	color?: TaskColor | null;
 	/** Mode IDs the task may be drawn in. undefined = unchanged, null or empty = every mode. */
 	modes?: string[] | null;
+	/** undefined = unchanged. */
+	reminders?: ReminderOffset[];
 }
 
 export type ChangeSource = "local" | "remote";
@@ -61,6 +72,9 @@ export type ChangeSource = "local" | "remote";
  * Every local mutation marks the task dirty so the sync engine pushes it.
  */
 export class TaskStore {
+	/** syncReminders changes tasks through `update`, which calls it again. */
+	private syncingReminders = false;
+
 	constructor(public data: StoreData, private readonly onChange: (source: ChangeSource) => void) {}
 
 	notify(source: ChangeSource): void {
@@ -113,6 +127,133 @@ export class TaskStore {
 		return this.data.recurrence[id] ?? this.pausedTask(id)?.rule ?? null;
 	}
 
+	/** The reminders set on a task. */
+	reminders(id: string): ReminderOffset[] {
+		return this.data.reminders[id]?.rules ?? this.pausedTask(id)?.reminders ?? [];
+	}
+
+	/** The task `id` is a reminder of, if it is one. */
+	reminderTask(id: string): Task | null {
+		const rid = this.resolveAlias(id);
+		for (const [mainId, entry] of Object.entries(this.data.reminders)) {
+			if (entry.rules.some((r) => r.taskId && this.resolveAlias(r.taskId) === rid)) return this.get(mainId) ?? null;
+		}
+		return null;
+	}
+
+	/** Takes over reminders from another device, per task the newer change wins. */
+	mergeReminders(incoming: Record<string, TaskReminders> | undefined): void {
+		if (!incoming || typeof incoming !== "object") return;
+		for (const [id, entry] of Object.entries(incoming)) {
+			const key = this.resolveAlias(id);
+			const mine = this.data.reminders[key];
+			if (!entry || typeof entry.updated !== "number" || !Array.isArray(entry.rules) || (mine && mine.updated >= entry.updated)) continue;
+			this.data.reminders[key] = entry;
+		}
+	}
+
+	/** Deletes a reminder's task while it is open; a completed one stays as done. */
+	private removeReminder(r: Reminder): void {
+		const task = r.taskId ? this.get(r.taskId) : undefined;
+		if (task?.status === "needsAction") this.delete(task.id, "remote");
+	}
+
+	/** The task is gone (or paused), so are its open reminders. */
+	private dropReminders(id: string): void {
+		const entry = this.data.reminders[id];
+		if (!entry) return;
+		delete this.data.reminders[id];
+		for (const r of entry.rules) this.removeReminder(r);
+	}
+
+	private setReminders(id: string, offsets: ReminderOffset[]): boolean {
+		const old = this.data.reminders[id]?.rules ?? [];
+		let textChanged = false;
+		const rules = offsets.map((o): Reminder => {
+			const r = old.find((x) => x.amount === o.amount && x.unit === o.unit);
+			if (!r) return offsetOf(o);
+			if ((r.text ?? "") !== (o.text ?? "")) {
+				textChanged = true;
+				if (o.text) r.text = o.text;
+				else delete r.text;
+			}
+			return r;
+		});
+		if (!textChanged && rules.length === old.length && rules.every((r) => old.includes(r))) return false;
+		for (const r of old) if (!rules.includes(r)) this.removeReminder(r);
+		this.data.reminders[id] = { rules, updated: Date.now() };
+		return true;
+	}
+
+	/** A reminder repeats its task's title, list, time, color and modes; its description is its own text and when the task is due. */
+	private copyToReminder(main: Task, reminder: Task, text?: string): void {
+		const [y, m, d] = (main.due ?? "").split("-");
+		const time = this.data.times[main.id];
+		const dueLine = `Due ${d}/${m}/${y}${time ? ` ${time}` : ""}`;
+		this.update(reminder.id, { title: REMINDER_PREFIX + main.title, notes: text ? `${text}\n${dueLine}` : dueLine, listId: main.listId }, "remote");
+		const copy = <T>(rec: Record<string, T>) => {
+			if (main.id in rec) rec[reminder.id] = rec[main.id];
+			else delete rec[reminder.id];
+		};
+		copy(this.data.times);
+		copy(this.data.colors);
+		copy(this.data.taskModes);
+	}
+
+	/** Creates a reminder's task, or adopts the one another device already created for it (as `maybeSpawnNext` does). */
+	private placeReminder(main: Task, date: string): Task {
+		const title = REMINDER_PREFIX + main.title;
+		return (
+			this.all().find((t) => t.title === title && t.listId === main.listId && t.due === date && t.status === "needsAction") ??
+			this.create({ title, listId: main.listId, due: date }, "local", true)
+		);
+	}
+
+	/**
+	 * Makes the reminder tasks match the tasks they belong to. A date is acted on only when it changes, so a reminder
+	 * deleted or completed by hand doesn't come back, and one dragged to another day stays there. When a task is
+	 * completed or loses its date, its open reminders go; moving it moves them, also out of a completed state.
+	 * A date already past gets no reminder.
+	 */
+	syncReminders(): void {
+		if (this.syncingReminders) return;
+		this.syncingReminders = true;
+		try {
+			const t0 = today();
+			for (const [id, entry] of Object.entries(this.data.reminders)) {
+				const main = this.data.tasks[id];
+				if (!main || main.pendingDelete) continue;
+				for (const r of entry.rules) {
+					const date = main.status === "needsAction" && main.due ? reminderDate(main.due, r) : undefined;
+					let reminder = r.taskId ? this.get(r.taskId) : undefined;
+					if (date !== r.date) {
+						r.date = date;
+						entry.updated = Date.now();
+						if (!date || date < t0) {
+							this.removeReminder(r);
+							delete r.taskId;
+							continue;
+						}
+						if (reminder) {
+							this.setCompleted(reminder.id, false, "remote");
+							this.update(reminder.id, { due: date }, "remote");
+						} else {
+							reminder = this.placeReminder(main, date);
+							r.taskId = reminder.id;
+						}
+					}
+					if (reminder?.status === "needsAction") this.copyToReminder(main, reminder, r.text);
+				}
+			}
+			const cutoff = Date.now() - KEEP_CLEARED_REMINDERS_DAYS * 86400000;
+			for (const [id, entry] of Object.entries(this.data.reminders)) {
+				if (entry.updated < cutoff && (!entry.rules.length || !this.data.tasks[id])) delete this.data.reminders[id];
+			}
+		} finally {
+			this.syncingReminders = false;
+		}
+	}
+
 	/** Whether `id` is a paused task (in the Paused column). */
 	isPaused(id: string): boolean {
 		return !!this.data.paused[id]?.on;
@@ -163,6 +304,8 @@ export class TaskStore {
 		if (this.data.times[task.id]) kept.time = this.data.times[task.id];
 		if (this.data.colors[task.id]) kept.color = this.data.colors[task.id];
 		if (this.data.taskModes[task.id]) kept.modes = [...this.data.taskModes[task.id]];
+		const reminders = this.data.reminders[task.id]?.rules;
+		if (reminders?.length) kept.reminders = reminders.map(offsetOf);
 		const kids = this.children(task.id);
 		if (kids.length) kept.subtasks = kids.map((c) => ({ title: c.title, notes: c.notes, due: c.due, done: c.status === "completed" }));
 		this.data.paused[task.id] = { on: true, updated: Date.now(), task: kept };
@@ -190,6 +333,7 @@ export class TaskStore {
 		if (kept.time) this.data.times[task.id] = kept.time;
 		if (kept.color) this.data.colors[task.id] = kept.color;
 		if (kept.modes?.length) this.data.taskModes[task.id] = [...kept.modes];
+		if (kept.reminders?.length) this.setReminders(task.id, kept.reminders);
 		for (const c of kept.subtasks ?? []) {
 			this.create(
 				{ title: c.title, notes: c.notes, listId: kept.listId, due: c.due, parent: task.id, status: c.done ? "completed" : "needsAction" },
@@ -198,6 +342,7 @@ export class TaskStore {
 			);
 		}
 		this.data.paused[id] = { on: false, updated: Date.now() };
+		this.syncReminders();
 		this.notify("local");
 		return task;
 	}
@@ -401,7 +546,11 @@ export class TaskStore {
 			} else delete this.data.recurrence[task.id];
 			changed = true;
 		}
-		if (changed) this.notify(source);
+		if (edit.reminders !== undefined && this.setReminders(task.id, edit.reminders)) changed = true;
+		if (changed) {
+			this.syncReminders();
+			this.notify(source);
+		}
 	}
 
 	setCompleted(id: string, done: boolean, source: ChangeSource = "local"): void {
@@ -414,6 +563,7 @@ export class TaskStore {
 		task.dirty = true;
 		task.localUpdated = Date.now();
 		if (done) this.maybeSpawnNext(task);
+		this.syncReminders();
 		this.notify(source);
 	}
 
@@ -422,6 +572,7 @@ export class TaskStore {
 		if (!task) return;
 		const ids = [task.id, ...this.children(task.id).map((c) => c.id)];
 		for (const tid of ids) {
+			this.dropReminders(tid);
 			const t = this.data.tasks[tid];
 			if (isLocalId(tid)) this.forget(tid);
 			else {
@@ -435,6 +586,7 @@ export class TaskStore {
 
 	/** Removes a task and all side data from the store. */
 	forget(id: string): void {
+		this.dropReminders(id);
 		delete this.data.tasks[id];
 		delete this.data.snapshots[id];
 		delete this.data.recurrence[id];
@@ -464,10 +616,12 @@ export class TaskStore {
 		moveKey(this.data.times);
 		moveKey(this.data.colors);
 		moveKey(this.data.taskModes);
+		moveKey(this.data.reminders);
 		moveKey(this.data.spawned);
 		moveKey(this.data.snapshots);
 		moveKey(this.data.paused);
 		for (const [k, v] of Object.entries(this.data.spawned)) if (v === oldId) this.data.spawned[k] = newId;
+		this.relinkReminder(oldId, newId);
 		const g = this.data.gift;
 		g.drawn = g.drawn.map((x) => (x === oldId ? newId : x));
 		g.done = g.done.map((x) => (x === oldId ? newId : x));
@@ -475,6 +629,12 @@ export class TaskStore {
 		this.data.aliases[oldId] = newId;
 		const keys = Object.keys(this.data.aliases);
 		if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete this.data.aliases[k];
+	}
+
+	private relinkReminder(oldId: string, newId: string): void {
+		for (const entry of Object.values(this.data.reminders)) {
+			for (const r of entry.rules) if (r.taskId === oldId) r.taskId = newId;
+		}
 	}
 
 	/** When a recurring task is completed, create its next occurrence (once). */
@@ -510,6 +670,9 @@ export class TaskStore {
 		if (color) this.data.colors[target.id] ??= color;
 		const modes = this.data.taskModes[task.id];
 		if (modes) this.data.taskModes[target.id] ??= [...modes];
+		// Only the offsets: the next occurrence gets reminder tasks of its own (in syncReminders).
+		const reminders = this.data.reminders[task.id]?.rules;
+		if (reminders?.length) this.data.reminders[target.id] ??= { rules: reminders.map(offsetOf), updated: Date.now() };
 		this.data.spawned[task.id] = target.id;
 	}
 
@@ -543,6 +706,11 @@ export class TaskStore {
 				if (this.data.times[t.id]) this.data.times[keep.id] ??= this.data.times[t.id];
 				if (this.data.colors[t.id]) this.data.colors[keep.id] ??= this.data.colors[t.id];
 				if (this.data.taskModes[t.id]) this.data.taskModes[keep.id] ??= this.data.taskModes[t.id];
+				if (this.data.reminders[t.id]) {
+					this.data.reminders[keep.id] ??= this.data.reminders[t.id];
+					delete this.data.reminders[t.id];
+				}
+				this.relinkReminder(t.id, keep.id);
 				if (!keep.notes && t.notes) this.update(keep.id, { notes: t.notes }, "remote");
 				for (const [k, v] of Object.entries(this.data.spawned)) if (v === t.id) this.data.spawned[k] = keep.id;
 				const g = this.data.gift;

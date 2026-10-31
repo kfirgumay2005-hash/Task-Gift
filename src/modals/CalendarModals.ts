@@ -6,6 +6,7 @@ import type { NamedTaskColor, TaskColor } from "../types";
 import { isDateString, shortDate } from "../util/dates";
 import { renderNotes } from "../calendars/notes";
 import { ConfirmModal } from "./ConfirmModal";
+import { DateField, INVALID_TIME, TimeField } from "./dateFields";
 import { attachNotesToolbar } from "./NotesEditor";
 import type { TemplateStore } from "../calendars/templates";
 import { showTemplatesMenu } from "./TemplateModals";
@@ -282,6 +283,8 @@ export class CalendarImportModal extends Modal {
 export class CalendarEntryModal extends Modal {
 	private draft: CalendarEntry;
 
+	private timeFields: TimeField[] = [];
+
 	constructor(
 		app: App,
 		private readonly calendars: CalendarStore,
@@ -309,21 +312,13 @@ export class CalendarEntryModal extends Modal {
 		});
 		window.setTimeout(() => title.focus(), 0);
 
-		new Setting(contentEl).setName("Day").addText((t) => {
-			t.inputEl.type = "date";
-			t.setValue(d.date).onChange((v) => (d.date = v));
-		});
-		new Setting(contentEl)
-			.setName("Time")
-			.setDesc("Leave empty for all day. An end before the start means the next day.")
-			.addText((t) => {
-				t.inputEl.type = "time";
-				t.setValue(d.start ?? "").onChange((v) => (d.start = v || null));
-			})
-			.addText((t) => {
-				t.inputEl.type = "time";
-				t.setValue(d.end ?? "").onChange((v) => (d.end = v || null));
-			});
+		const day = new Setting(contentEl).setName("Day");
+		new DateField(day.controlEl, { value: d.date, label: "Day", panelParent: day.settingEl, onChange: (v) => (d.date = v) });
+		const time = new Setting(contentEl).setName("Time").setDesc("Leave empty for all day. An end before the start means the next day.");
+		this.timeFields = [
+			new TimeField(time.controlEl, { value: d.start ?? "", label: "Start time", onChange: (v) => (d.start = v || null) }),
+			new TimeField(time.controlEl, { value: d.end ?? "", label: "End time", onChange: (v) => (d.end = v || null) }),
+		];
 		const notes = contentEl.createEl("textarea", { cls: "tg-import-text tg-entry-notes", attr: { placeholder: "Description. Use the toolbar for checkboxes, lists and formatting.", dir: "auto", rows: "10" } });
 		notes.value = d.notes;
 		// Grows with the text, so a long description is shown whole (up to most of the screen, then it scrolls).
@@ -357,6 +352,10 @@ export class CalendarEntryModal extends Modal {
 	}
 
 	private async save(): Promise<void> {
+		if (this.timeFields.some((f) => !f.isValid)) {
+			new Notice(INVALID_TIME);
+			return;
+		}
 		const d = this.draft;
 		d.title = d.title.trim();
 		// Only blank lines and trailing spaces go: the first line's indent may be a nested list.

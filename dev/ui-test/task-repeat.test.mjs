@@ -12,7 +12,7 @@ const check = (name, ok, got) => {
 // Picks an option in the n-th select matching `selector`, like choosing it from the dropdown.
 const choose = (selector, value, n = 0) =>
 	page.ev(`(()=>{const s=document.querySelectorAll(${JSON.stringify(selector)})[${n}];s.value=${JSON.stringify(value)};s.dispatchEvent(new Event('change'))})()`);
-const due = () => page.ev(`document.querySelector('.tg-form input[type=date]').value`);
+const due = () => page.ev(`document.querySelector('.tg-form .tg-date-field').dataset.value`);
 const preview = () => page.ev(`document.querySelector('.tg-after-line + .tg-subhint')?.textContent ?? null`);
 
 try {
@@ -36,7 +36,9 @@ try {
 	check("preview lists the next dates", /Nov.*16.*Dec.*14.*Jan.*11.*Feb.*15/s.test((await preview()) ?? ""), await preview());
 
 	// Picking a date by hand: the due date goes to the first matching day from there.
-	await page.ev(`(()=>{const i=document.querySelector('.tg-form input[type=date]');i.value='2027-03-01';i.dispatchEvent(new Event('change'))})()`);
+	await page.click(...(await page.center(".tg-form .tg-date-field")));
+	await page.ev(`(()=>{const next=document.querySelector('.tg-date-nav[aria-label="Next month"]');while(!document.querySelector('[data-date="2027-03-01"]'))next.click()})()`);
+	await page.click(...(await page.center('[data-date="2027-03-01"]')));
 	check("hand-picked date snaps to the rule", (await due()) === "2027-03-15", await due());
 	check("controls kept after the date change", (await page.ev(`document.querySelector('.tg-after-line input')?.value`)) === "10", null);
 

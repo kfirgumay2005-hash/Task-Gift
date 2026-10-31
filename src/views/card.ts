@@ -2,7 +2,7 @@ import { Menu, setIcon } from "obsidian";
 import { ConfirmModal } from "../modals/ConfirmModal";
 import type TaskGiftPlugin from "../main";
 import type { Task } from "../types";
-import { describeRule } from "../recurrence/rule";
+import { describeReminder, describeRule } from "../recurrence/rule";
 import { addDays, friendlyDate, today } from "../util/dates";
 import { taskColorCss } from "../defaults";
 
@@ -179,6 +179,11 @@ export function renderCard(parent: HTMLElement, plugin: TaskGiftPlugin, task: Ta
 		});
 		setIcon(chip.createSpan({ cls: "tg-meta-icon" }), "repeat");
 		if (upcoming) chip.createSpan({ text: "Upcoming repeat" });
+	}
+	const reminders = store.reminders(task.id);
+	if (reminders.length && !upcoming) {
+		const chip = meta.createSpan({ cls: "tg-meta", attr: { "aria-label": `Reminders: ${reminders.map(describeReminder).join(", ")} before` } });
+		setIcon(chip.createSpan({ cls: "tg-meta-icon" }), "bell");
 	}
 	const kids = store.children(task.id);
 	if (kids.length) {

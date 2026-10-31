@@ -28,6 +28,21 @@ export function nowTime(): string {
 	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** HH:MM from what was typed ("14:30", "1430", "9.30", "9", "2:30pm"), or null if it isn't a time. */
+export function parseTime(text: string): string | null {
+	const m = text.trim().match(/^(\d{1,2})(?:[:.]?(\d{2}))?\s*(am?|pm?)?$/i);
+	if (!m) return null;
+	let h = Number(m[1]);
+	const min = Number(m[2] ?? 0);
+	const half = m[3]?.[0].toLowerCase();
+	if (half) {
+		if (h < 1 || h > 12) return null;
+		h = (h % 12) + (half === "p" ? 12 : 0);
+	}
+	if (h > 23 || min > 59) return null;
+	return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
 export function addDays(s: string, n: number): string {
 	const d = parseDate(s);
 	d.setDate(d.getDate() + n);

@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import type { DayColumn } from "../types";
 import { addDays, isDateString, today } from "../util/dates";
+import { DateField } from "./dateFields";
 
 /** Creates or edits a board column for one chosen day. */
 export class DayColumnModal extends Modal {
@@ -26,13 +27,8 @@ export class DayColumnModal extends Modal {
 		this.setTitle(this.existing ? "Edit day column" : "New day column");
 		const { contentEl } = this;
 
-		new Setting(contentEl)
-			.setName("Day")
-			.setDesc("The column shows the tasks due on this day.")
-			.addText((t) => {
-				t.inputEl.type = "date";
-				t.setValue(this.date).onChange((v) => (this.date = v));
-			});
+		const day = new Setting(contentEl).setName("Day").setDesc("The column shows the tasks due on this day.");
+		new DateField(day.controlEl, { value: this.date, label: "Day", panelParent: day.settingEl, onChange: (v) => (this.date = v) });
 		new Setting(contentEl)
 			.setName("Name")
 			.setDesc("Optional. Without a name the column shows the date.")

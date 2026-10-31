@@ -1,4 +1,4 @@
-import type { RecurrencePreset, RecurrenceRule, Weekday } from "../types";
+import type { RecurrencePreset, RecurrenceRule, ReminderOffset, Weekday } from "../types";
 import {
 	addDays,
 	addMonths,
@@ -163,6 +163,17 @@ export function occurrencesBetween(rule: RecurrenceRule, currentDue: string, fro
 		if (due >= from) out.push(due);
 	}
 	return out;
+}
+
+/** The date a reminder falls on for a task due on `due`. */
+export function reminderDate(due: string, offset: ReminderOffset): string {
+	if (offset.unit === "months") return addMonths(due, -offset.amount);
+	return addDays(due, -offset.amount * (offset.unit === "weeks" ? 7 : 1));
+}
+
+/** "1 week", "3 days". */
+export function describeReminder(offset: ReminderOffset): string {
+	return `${offset.amount} ${offset.amount === 1 ? offset.unit.slice(0, -1) : offset.unit}`;
 }
 
 export function describeRule(rule: RecurrenceRule): string {

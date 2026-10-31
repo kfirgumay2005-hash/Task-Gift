@@ -180,6 +180,8 @@ export class SyncEngine {
 		this.completedRemotely = [];
 		const removed = this.store.removeDuplicates();
 		if (removed.length) this.hooks.onDuplicatesRemoved(removed);
+		// Tasks changed in Google (moved, completed, renamed) take their reminders along.
+		this.store.syncReminders();
 		data.lastSyncAt = startedAt;
 		if (full) data.lastFullSyncAt = startedAt;
 	}

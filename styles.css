@@ -1578,6 +1578,213 @@
 	width: 64px;
 }
 
+.tg-date-field {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: var(--input-height, 30px);
+	padding: 0 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--input-radius, 5px);
+	background: var(--background-modifier-form-field, var(--background-primary));
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.tg-date-field:hover,
+.tg-date-field[aria-expanded="true"] {
+	border-color: var(--interactive-accent);
+}
+
+.tg-date-field.is-empty {
+	color: var(--text-muted);
+}
+
+.tg-date-field-icon {
+	display: inline-flex;
+	color: var(--text-muted);
+}
+
+.tg-date-field-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tg-time-field {
+	width: 72px;
+	text-align: center;
+}
+
+.tg-time-field.is-invalid {
+	border-color: var(--text-error, var(--color-red));
+}
+
+.tg-date-host {
+	flex-wrap: wrap;
+}
+
+.tg-date-host > .tg-date-panel {
+	order: 1;
+	flex-basis: 100%;
+}
+
+.tg-ends > .tg-date-panel {
+	order: 0;
+	flex-basis: auto;
+}
+
+.tg-date-panel {
+	box-sizing: border-box;
+	max-width: 320px;
+	margin-top: 4px;
+	padding: 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-secondary);
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.tg-date-panel.is-hidden {
+	display: none;
+}
+
+.tg-date-host > .tg-date-panel:not(.is-hidden) {
+	display: block;
+}
+
+.tg-date-head {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-bottom: 6px;
+}
+
+.tg-date-month {
+	flex: 1;
+	text-align: center;
+	font-weight: var(--font-semibold, 600);
+}
+
+.tg-date-nav {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.tg-date-nav:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.tg-date-nav svg {
+	width: 16px;
+	height: 16px;
+}
+
+.tg-date-grid {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 2px;
+}
+
+.tg-date-weekdays {
+	margin-bottom: 2px;
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.tg-date-day {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 34px;
+	border-radius: 8px;
+	cursor: pointer;
+}
+
+.tg-date-day:hover {
+	background: var(--background-modifier-hover);
+}
+
+.tg-date-day.is-outside {
+	color: var(--text-faint);
+}
+
+.tg-date-day.is-today {
+	box-shadow: inset 0 0 0 1px var(--interactive-accent);
+	font-weight: var(--font-semibold, 600);
+}
+
+.tg-date-day.is-selected,
+.tg-date-day.is-selected:hover {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: var(--font-semibold, 600);
+}
+
+.tg-date-day.is-disabled {
+	opacity: 0.35;
+	background: none;
+	cursor: default;
+}
+
+.tg-date-quick {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.tg-date-quick-item {
+	flex: 1;
+	padding: 4px 0;
+	border-radius: 999px;
+	background: var(--background-primary);
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.tg-date-quick-item:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.tg-reminders {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.tg-reminder {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.tg-reminder-date {
+	flex: 1;
+	min-width: 0;
+}
+
+.tg-reminder-text {
+	width: 100%;
+	resize: vertical;
+}
+
+.tg-reminder-add {
+	align-self: flex-start;
+}
+
 .tg-weekday-chips,
 .tg-filter-chips {
 	display: flex;

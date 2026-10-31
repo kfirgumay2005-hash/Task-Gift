@@ -5,6 +5,7 @@ import { AuthError, refresh, revoke } from "./auth/oauth";
 import { DEFAULT_SETTINGS, DEFAULT_STICKY_COMMANDS, emptyGiftState, emptyStore, KEEP_COMPLETED_OPTIONS, KEEP_FOREVER, MIN_SYNC_SECONDS, VIEW_TYPE } from "./defaults";
 import { ConfirmModal } from "./modals/ConfirmModal";
 import { ConnectModal } from "./modals/ConnectModal";
+import { useWeekStart } from "./modals/dateFields";
 import { LoginModal } from "./modals/LoginModal";
 import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
@@ -98,6 +99,7 @@ export default class TaskGiftPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadPluginData();
+		useWeekStart(() => this.settings.weekStart);
 
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
 		this.store.migratePauses();
@@ -317,6 +319,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private static mergeStore(raw: Partial<StoreData> | undefined): StoreData {
 		const store = Object.assign(emptyStore(), raw ?? {});
 		if (!store.taskModes || typeof store.taskModes !== "object") store.taskModes = {};
+		if (!store.reminders || typeof store.reminders !== "object") store.reminders = {};
 		if (!store.dayTitles || typeof store.dayTitles !== "object") store.dayTitles = {};
 		if (!store.stickies || typeof store.stickies !== "object") store.stickies = {};
 		if (!store.paused || typeof store.paused !== "object") store.paused = {};
@@ -502,6 +505,7 @@ export default class TaskGiftPlugin extends Plugin {
 				d.times = { ...d.times, ...inc.times };
 				d.colors = { ...d.colors, ...inc.colors };
 				d.taskModes = { ...d.taskModes, ...inc.taskModes };
+				this.store.mergeReminders(inc.reminders);
 				this.store.mergePaused(inc.paused);
 				d.spawned = { ...d.spawned, ...inc.spawned };
 				d.aliases = { ...d.aliases, ...inc.aliases };
@@ -759,6 +763,8 @@ export default class TaskGiftPlugin extends Plugin {
 	// ------------------------------------------------------------ UI
 
 	openTaskModal(task?: Task, defaults?: TaskModalOptions["defaults"]): void {
+		// A reminder copies its task, so editing it means editing that task.
+		if (task) task = this.store.reminderTask(task.id) ?? task;
 		const colors =
 			this.settings.taskColorScope === "off"
 				? undefined

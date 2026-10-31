@@ -1,10 +1,11 @@
 import { App, Menu, Modal, Notice, setIcon } from "obsidian";
-import type { NamedTaskColor, RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, Task, TaskColor, Weekday } from "../types";
+import type { NamedTaskColor, RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, ReminderOffset, ReminderUnit, Task, TaskColor, Weekday } from "../types";
 import type { TaskStore } from "../sync/store";
-import { firstMatchOnOrAfter, isLastWeekdayOfMonth, nthOfMonth, occurrencesBetween, ruleFromPreset } from "../recurrence/rule";
+import { firstMatchOnOrAfter, isLastWeekdayOfMonth, nthOfMonth, occurrencesBetween, reminderDate, ruleFromPreset } from "../recurrence/rule";
 import { addDays, addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT, weekday } from "../util/dates";
-import { TASK_COLORS, taskColorCss } from "../defaults";
+import { MAX_REMINDERS, TASK_COLORS, taskColorCss } from "../defaults";
 import { ConfirmModal } from "./ConfirmModal";
+import { DateField, INVALID_TIME, TimeField } from "./dateFields";
 import { copyDescription } from "./NotesEditor";
 
 type RepeatChoice = "none" | RecurrencePreset;
@@ -45,11 +46,15 @@ export class TaskModal extends Modal {
 	private existingRule: RecurrenceRule | null = null;
 	/** Date last picked by hand; choosing weekdays moves the due date to the first matching day from here. */
 	private dateBase = "";
+	private reminderOffsets: ReminderOffset[] = [];
 
+	private remindersEl!: HTMLElement;
+	/** The date shown next to each reminder, in `reminderOffsets` order. */
+	private reminderDateEls: HTMLElement[] = [];
 	private repeatSelect!: HTMLSelectElement;
-	private dateInput!: HTMLInputElement;
+	private dateInput!: DateField;
 	private customEl!: HTMLElement;
-	private timeInput!: HTMLInputElement;
+	private timeInput!: TimeField;
 
 	constructor(app: App, private readonly store: TaskStore, private readonly opts: TaskModalOptions = {}) {
 		super(app);
@@ -66,6 +71,7 @@ export class TaskModal extends Modal {
 			this.modes = new Set((store.modes(t.id) ?? []).filter((id) => known.has(id)));
 			const rule = store.rule(t.id);
 			if (rule) this.loadRule(rule);
+			this.reminderOffsets = store.reminders(t.id).map((r) => ({ amount: r.amount, unit: r.unit, text: r.text }));
 		} else {
 			this.listId = opts.defaults?.listId ?? store.defaultListId() ?? "";
 			this.due = opts.defaults?.due ?? "";
@@ -134,12 +140,26 @@ export class TaskModal extends Modal {
 		listSelect.addEventListener("change", () => (this.listId = listSelect.value));
 
 		const dateRow = this.row(form, "calendar", "Due");
-		const dateInput = (this.dateInput = dateRow.createEl("input", { cls: "tg-input", attr: { type: "date" } }));
-		dateInput.value = this.due;
-		this.timeInput = dateRow.createEl("input", { cls: "tg-input", attr: { type: "time" } });
-		this.timeInput.value = this.time;
+		const dateInput = (this.dateInput = new DateField(dateRow, {
+			value: this.due,
+			label: "Due date",
+			placeholder: "No date",
+			panelParent: dateRow,
+			onChange: (value) => {
+				this.due = value;
+				this.dateBase = this.due;
+				this.timeInput.disabled = !this.due;
+				if (!this.due) {
+					this.timeInput.value = "";
+					this.time = "";
+				}
+				this.syncWeekdaysToDate();
+				this.refreshRepeatOptions();
+				this.snapDueToAfter();
+			},
+		}));
+		this.timeInput = new TimeField(dateRow, { value: this.time, label: "Due time", onChange: (value) => (this.time = value) });
 		this.timeInput.disabled = !this.due;
-		this.timeInput.addEventListener("input", () => (this.time = this.timeInput.value));
 		const clearBtn = dateRow.createEl("button", { cls: "clickable-icon tg-clear", attr: { "aria-label": "Clear date" } });
 		setIcon(clearBtn, "x");
 		clearBtn.addEventListener("click", () => {
@@ -151,18 +171,6 @@ export class TaskModal extends Modal {
 			this.timeInput.disabled = true;
 			this.refreshRepeatOptions();
 		});
-		dateInput.addEventListener("change", () => {
-			this.due = dateInput.value;
-			this.dateBase = this.due;
-			this.timeInput.disabled = !this.due;
-			if (!this.due) {
-				this.timeInput.value = "";
-				this.time = "";
-			}
-			this.syncWeekdaysToDate();
-			this.refreshRepeatOptions();
-			this.snapDueToAfter();
-		});
 
 		const repeatRow = this.row(form, "repeat", "Repeat");
 		this.repeatSelect = repeatRow.createEl("select", { cls: "dropdown" });
@@ -173,6 +181,10 @@ export class TaskModal extends Modal {
 		});
 		this.customEl = form.createDiv({ cls: "tg-custom" });
 		this.refreshRepeatOptions();
+
+		this.remindersEl = this.row(form, "bell", "Reminders");
+		this.remindersEl.addClass("tg-reminders");
+		this.renderReminders();
 
 		if (this.opts.colors) this.renderColorRow(this.row(form, "palette", "Color"), this.opts.colors);
 		if (this.opts.modes?.length) this.renderModesRow(this.row(form, "layers", "Gift modes"), this.opts.modes);
@@ -300,6 +312,89 @@ export class TaskModal extends Modal {
 		});
 	}
 
+	/** One line per reminder ("[1] [week(s)] before") and its own description, each a separate task that long before this one. */
+	private renderReminders(): void {
+		const el = this.remindersEl;
+		el.empty();
+		this.reminderDateEls = this.reminderOffsets.map((offset, i) => {
+			const reminder = el.createDiv({ cls: "tg-reminder" });
+			const line = reminder.createDiv({ cls: "tg-custom-line tg-reminder-line" });
+			const n = line.createEl("input", { cls: "tg-input tg-num", attr: { type: "number", min: "1", max: "999", "aria-label": "How long before" } });
+			n.value = String(offset.amount);
+			n.addEventListener("input", () => {
+				offset.amount = Math.max(1, parseInt(n.value) || 1);
+				this.refreshReminderDates();
+			});
+			const unit = line.createEl("select", { cls: "dropdown", attr: { "aria-label": "Unit" } });
+			for (const [v, label] of [
+				["days", "day(s)"],
+				["weeks", "week(s)"],
+				["months", "month(s)"],
+			] as [ReminderUnit, string][]) {
+				unit.createEl("option", { value: v, text: label });
+			}
+			unit.value = offset.unit;
+			unit.addEventListener("change", () => {
+				offset.unit = unit.value as ReminderUnit;
+				this.refreshReminderDates();
+			});
+			line.createSpan({ text: "before" });
+			const date = line.createSpan({ cls: "tg-subhint tg-reminder-date" });
+			const remove = line.createEl("button", { cls: "clickable-icon tg-clear", attr: { type: "button", "aria-label": "Remove reminder" } });
+			setIcon(remove, "x");
+			remove.addEventListener("click", () => {
+				this.reminderOffsets.splice(i, 1);
+				this.renderReminders();
+			});
+			const text = reminder.createEl("textarea", {
+				cls: "tg-input tg-reminder-text",
+				attr: { rows: "2", placeholder: "Description of this reminder (optional)", dir: "auto", "aria-label": "Reminder description" },
+			});
+			text.value = offset.text ?? "";
+			text.addEventListener("input", () => (offset.text = text.value));
+			return date;
+		});
+		if (this.reminderOffsets.length < MAX_REMINDERS) {
+			const add = el.createEl("button", { cls: "tg-reminder-add", text: "Add reminder", attr: { type: "button" } });
+			add.addEventListener("click", () => {
+				const used = (o: ReminderOffset) => this.reminderOffsets.some((r) => r.amount === o.amount && r.unit === o.unit);
+				const suggested: ReminderOffset[] = [
+					{ amount: 1, unit: "days" },
+					{ amount: 1, unit: "weeks" },
+					{ amount: 1, unit: "months" },
+				];
+				this.reminderOffsets.push(suggested.find((o) => !used(o)) ?? suggested[0]);
+				this.renderReminders();
+			});
+		}
+		this.refreshReminderDates();
+	}
+
+	private refreshReminderDates(): void {
+		this.reminderDateEls.forEach((el, i) => {
+			if (!this.due) {
+				el.setText("Needs a due date");
+				return;
+			}
+			const date = reminderDate(this.due, this.reminderOffsets[i]);
+			const label = parseDate(date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+			el.setText(date < today() ? `${label} (passed, no reminder)` : label);
+		});
+	}
+
+	/** The reminders to save; two that fall on the same day would be the same task. */
+	private distinctReminders(due: string | null): ReminderOffset[] {
+		const seen = new Set<string>();
+		return this.reminderOffsets
+			.filter((o) => {
+				const key = due ? reminderDate(due, o) : `${o.amount} ${o.unit}`;
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			})
+			.map((o) => ({ amount: o.amount, unit: o.unit, text: o.text?.trim() || undefined }));
+	}
+
 	/** Makes the weekday circles include the due date's weekday (replacing a single selected day). */
 	private syncWeekdaysToDate(): void {
 		if (!this.due) return;
@@ -377,6 +472,7 @@ export class TaskModal extends Modal {
 
 	/** Rebuilds the repeat choices, whose labels depend on the due date ("Weekly on …"). */
 	private refreshRepeatLabels(): void {
+		this.refreshReminderDates();
 		const d = parseDate(this.refDate());
 		const sel = this.repeatSelect;
 		sel.empty();
@@ -485,10 +581,8 @@ export class TaskModal extends Modal {
 		};
 		option("never", "Never");
 		option("until", "On", (row) => {
-			const input = row.createEl("input", { cls: "tg-input", attr: { type: "date" } });
-			input.value = this.endDate || addMonths(this.refDate(), 3);
-			this.endDate = input.value;
-			input.addEventListener("change", () => (this.endDate = input.value));
+			this.endDate ||= addMonths(this.refDate(), 3);
+			new DateField(row, { value: this.endDate, label: "Last date", panelParent: ends, onChange: (value) => (this.endDate = value) });
 		});
 		option("count", "After", (row) => {
 			const input = row.createEl("input", { cls: "tg-input tg-num", attr: { type: "number", min: "1", max: "999" } });
@@ -583,6 +677,10 @@ export class TaskModal extends Modal {
 			new Notice("Please enter a title.");
 			return;
 		}
+		if (!this.timeInput.isValid) {
+			new Notice(INVALID_TIME);
+			return;
+		}
 		let due = this.due || null;
 		if (this.repeat !== "none" && !due) {
 			due = today();
@@ -595,11 +693,12 @@ export class TaskModal extends Modal {
 		const task = this.opts.task;
 		const color = this.opts.colors ? this.color : undefined;
 		const modes = this.opts.modes?.length ? [...this.modes] : undefined;
+		const reminders = this.distinctReminders(due);
 		if (task) {
-			this.store.update(task.id, { title, notes: this.notes, due, listId: this.listId, time, recurrence: rule, color, modes });
+			this.store.update(task.id, { title, notes: this.notes, due, listId: this.listId, time, recurrence: rule, color, modes, reminders });
 		} else {
 			const created = this.store.create({ title, notes: this.notes, listId: this.listId, due }, "local", true);
-			this.store.update(created.id, { time, recurrence: rule, color, modes });
+			this.store.update(created.id, { time, recurrence: rule, color, modes, reminders });
 			this.store.notify("local");
 		}
 		this.close();
