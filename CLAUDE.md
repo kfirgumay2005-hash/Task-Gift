@@ -11,7 +11,8 @@ The repo _is_ the installed plugin folder inside the user's vault (`.obsidian/pl
 - The plugin reloads itself when `main.js` / `styles.css` / `manifest.json` change on disk (`checkForUpdate` in
   `main.ts`), so a build — or a new version arriving through sync — takes effect without toggling the plugin.
 - Don't bump the version (`manifest.json`, `package.json`) on small updates; only when the user says to.
-  "Bump the version" (תעלה גרסה) also means commit and push to GitHub, without asking again.
+  "Bump the version" (תעלה גרסה) also means commit, push to GitHub and create a GitHub Release (tag = the version,
+  assets `main.js`, `manifest.json`, `styles.css`, notes in English), without asking again.
 - The user writes in Hebrew; answer in Hebrew. All UI text in the plugin stays English. Original spec: `prompt.md`.
 - To debug sync, read the vault notes directly (path in `data.json` → `dataFilePath`; currently
   `ארכיון/Tasksgift/`). Notes written by this device have ns-precision mtimes; files written by LiveSync have
