@@ -18,7 +18,7 @@ export const DEFAULT_DAY_TITLE: DayTitleFields = { text: "", color: null, size: 
 const DEFAULT_END_NOTE: DayTitleEndNote = { shown: false, text: "", color: null, size: "small", bold: false, italic: false, highlight: false, position: "below" };
 
 /** Letters of the right-to-left scripts. */
-const RTL = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
+const RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFC]/;
 
 /** Text whose letters can have their own colors: the heading and the end date's words. */
 interface ColoredText {
