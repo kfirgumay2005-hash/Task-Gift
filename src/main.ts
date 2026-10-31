@@ -127,6 +127,7 @@ export default class TaskGiftPlugin extends Plugin {
 		this.addRibbonIcon("gift", "Open Task Gift", () => void this.activateView());
 		this.addRibbonIcon("clipboard-plus", "New Google task", () => this.openTaskModal());
 
+		this.addCommand({ id: "open-task-gift", name: "Open Task Gift", callback: () => void this.activateView() });
 		this.addCommand({ id: "open-view", name: "Open board", callback: () => void this.activateView() });
 		this.addCommand({
 			id: "open-calendar",
