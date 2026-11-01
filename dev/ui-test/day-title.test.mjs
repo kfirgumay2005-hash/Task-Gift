@@ -93,6 +93,43 @@ try {
 	const endHtml = () => page.ev(`document.querySelector('.tg-day-title-preview .tg-day-title-end .tg-day-title-text').innerHTML`);
 	check("selected letters of the words get the color", (await endHtml()).startsWith('<span data-color="red"'), await endHtml());
 	check("topic colors untouched by the end date's row", !(await preview()).includes("red"), await preview());
+
+	// Colors added by the user: offered after the built-in ones, in both color rows, and saved for next time.
+	const titleRow = ".modal-content .tg-color-swatches";
+	const endRow = ".tg-day-title-end-settings .tg-color-swatches";
+	const titleEl = ".tg-day-title-preview .tg-day-title:not(.tg-day-title-end)";
+	const titleColor = () => page.ev(`document.querySelector('${titleEl}').style.getPropertyValue('--tg-task-color')`);
+	const hasSwatch = (row, hex) => page.ev(`!!document.querySelector('${row} .tg-color-swatch[aria-label^="${hex}"]')`);
+	const addColor = (hex) => page.ev(`(()=>{const i=document.querySelector('${titleRow} .tg-color-input');i.value='${hex}';i.dispatchEvent(new Event('change'))})()`);
+	const removeColor = (hex) => page.ev(`(()=>{document.querySelector('${titleRow} .tg-color-swatch[aria-label^="${hex}"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));window.lastMenu.find((i)=>i.title==='Remove color').click()})()`);
+	const palette = () => page.ev(`window.savedPalette`);
+	const selectTitle = (a, b) => page.ev(`(()=>{const i=document.querySelector('.tg-day-title-main-input');i.focus();i.setSelectionRange(${a},${b})})()`);
+
+	check("saved color offered in both rows", (await hasSwatch(titleRow, "#123456")) && (await hasSwatch(endRow, "#123456")), null);
+	await selectTitle(2, 2);
+	await page.sleep(50);
+	await page.click(...(await page.center(`${titleRow} .tg-color-swatch[aria-label^="#123456"]`)));
+	check("saved color colors the title", (await titleColor()) === "#123456", await titleColor());
+	check("its swatch is marked", await page.ev(`document.querySelector('${titleRow} .tg-color-swatch[aria-label^="#123456"]').classList.contains('is-active')`), null);
+
+	await addColor("#ABCDEF");
+	check("added color is saved after the others", JSON.stringify(await palette()) === '["#123456","#abcdef"]', await palette());
+	check("added color appears in both rows", (await hasSwatch(titleRow, "#abcdef")) && (await hasSwatch(endRow, "#abcdef")), null);
+	check("added color is applied", (await titleColor()) === "#abcdef", await titleColor());
+	await selectTitle(0, 5);
+	await page.sleep(50);
+	await addColor("#fedcba");
+	check("added color colors the selected letters", (await preview()).startsWith('<span data-color="#fedcba"'), await preview());
+	check("end date's row untouched by adding", (await endHtml()).startsWith('<span data-color="red"'), await endHtml());
+	await selectTitle(0, 5);
+	await page.click(...(await page.center(`${titleRow} .tg-color-swatch`)));
+	await selectTitle(2, 2);
+
+	await removeColor("#123456");
+	check("removed color leaves the palette and both rows", JSON.stringify(await palette()) === '["#abcdef","#fedcba"]' && !(await hasSwatch(titleRow, "#123456")) && !(await hasSwatch(endRow, "#123456")), await palette());
+	await removeColor("#abcdef");
+	check("a removed color stays where the title uses it", (await titleColor()) === "#abcdef" && (await hasSwatch(titleRow, "#abcdef")) && !(await hasSwatch(endRow, "#abcdef")), await palette());
+
 	await setEnd("never");
 	check("end date hidden for 'Never'", !(await untilShown()) && !(await timeShown()) && (await endEl()) === null, await endEl());
 	await page.click(...(await page.center(".tg-modal-buttons .mod-cta")));

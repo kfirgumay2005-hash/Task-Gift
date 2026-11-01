@@ -364,13 +364,13 @@ export class TaskView extends ItemView {
 		// A new topic starts with the last heading's style, not its text, letter colors or end.
 		const fresh = () => {
 			const last = store.lastDayTitle();
-			new DayTitleModal(this.app, date, { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined, untilTime: undefined }, save(date)).open();
+			new DayTitleModal(this.app, date, { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined, untilTime: undefined }, this.plugin.colorPalette(), save(date)).open();
 		};
 		btn.addEventListener("click", () => {
 			if (!active) return fresh();
 			// A topic that lasts from an earlier day is edited where it was written.
 			const earlier = active.start !== date;
-			new DayTitleModal(this.app, active.start, active.title, save(active.start), earlier ? fresh : undefined).open();
+			new DayTitleModal(this.app, active.start, active.title, this.plugin.colorPalette(), save(active.start), earlier ? fresh : undefined).open();
 		});
 	}
 

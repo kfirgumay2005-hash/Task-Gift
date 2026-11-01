@@ -1,6 +1,6 @@
-import { App, Modal, Notice, Setting, setIcon } from "obsidian";
+import { App, Menu, Modal, Notice, Setting, setIcon } from "obsidian";
 import { TASK_COLORS, taskColorCss } from "../defaults";
-import type { DayTitle, DayTitleEndNote, DayTitleEndPosition, DayTitlePart, DayTitleSize, DayTitleStyle, NamedTaskColor, TaskColor } from "../types";
+import type { ColorPalette, DayTitle, DayTitleEndNote, DayTitleEndPosition, DayTitlePart, DayTitleSize, DayTitleStyle, NamedTaskColor, TaskColor } from "../types";
 import { addDays, shortDate, today } from "../util/dates";
 import { DateField, INVALID_TIME, TimeField } from "./dateFields";
 
@@ -115,6 +115,8 @@ class LetterColorField {
 	input!: HTMLInputElement;
 	/** Shows what the color row will color. */
 	private hint!: HTMLElement;
+	private swatchRow!: HTMLElement;
+	private swatches: { el: HTMLElement; value: TaskColor | null }[] = [];
 	private readonly onSelectionChange = () => this.updateHint();
 	/** Also checks the field now and then, so the preview follows typing even if its events never arrive. */
 	private poll = 0;
@@ -123,6 +125,9 @@ class LetterColorField {
 		private readonly target: ColoredText,
 		/** What the whole text is called in the hint ("title", "words"). */
 		private readonly noun: string,
+		private readonly palette: ColorPalette,
+		/** The palette gained or lost a color: every field of the modal redraws its color row. */
+		private readonly paletteChanged: () => void,
 		private readonly changed: () => void,
 	) {
 		for (const p of partsOf(target)) for (let i = 0; i < p.text.length; i++) this.colors.push(p.color);
@@ -157,38 +162,89 @@ class LetterColorField {
 		const color = new Setting(parent).setName("Color");
 		this.hint = color.descEl.createSpan({ cls: "tg-day-title-hint" });
 		this.updateHint();
-		const row = color.controlEl.createDiv({ cls: "tg-color-swatches", attr: { role: "group", "aria-label": `${o.name} color` } });
-		const swatches: { el: HTMLElement; value: TaskColor | null }[] = [];
-		const markActive = () => {
-			const whole = !this.colors.some((c) => c);
-			for (const w of swatches) w.el.toggleClass("is-active", whole && w.value === this.target.color);
-		};
-		const swatch = (value: TaskColor | null, label: string) => {
+		this.swatchRow = color.controlEl.createDiv({ cls: "tg-color-swatches", attr: { role: "group", "aria-label": `${o.name} color` } });
+		this.drawSwatches();
+	}
+
+	/** The color row: no color, the built-in colors, the user's colors and "+" to add one. */
+	drawSwatches(): void {
+		const row = this.swatchRow;
+		row.empty();
+		this.swatches = [];
+		const pressable = (label: string, onPress: () => void): HTMLElement => {
 			const el = row.createDiv({ cls: "tg-color-swatch", attr: { role: "button", tabindex: "0", "aria-label": label } });
-			swatches.push({ el, value });
+			// Keeps the field focused so its selection stays visible (the offsets stay either way).
+			el.addEventListener("mousedown", (e) => e.preventDefault());
+			el.addEventListener("click", onPress);
+			el.addEventListener("keydown", (e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				onPress();
+			});
+			return el;
+		};
+		const pick = (value: TaskColor | null, label: string): HTMLElement => {
+			const el = pressable(label, () => {
+				this.sync();
+				this.applyColor(value);
+				this.markActive();
+				this.changed();
+			});
+			this.swatches.push({ el, value });
 			if (value) el.style.setProperty("--tg-task-color", taskColorCss(value));
 			else {
 				el.addClass("is-none");
 				setIcon(el, "ban");
 			}
-			// Keeps the field focused so its selection stays visible (the offsets stay either way).
-			el.addEventListener("mousedown", (e) => e.preventDefault());
-			const apply = () => {
-				this.sync();
-				this.applyColor(value);
-				markActive();
-				this.changed();
-			};
-			el.addEventListener("click", apply);
-			el.addEventListener("keydown", (e) => {
-				if (e.key !== "Enter" && e.key !== " ") return;
-				e.preventDefault();
-				apply();
-			});
+			return el;
 		};
-		swatch(null, "No color");
-		for (const [value, label] of Object.entries(TASK_COLORS)) swatch(value as NamedTaskColor, label);
-		markActive();
+
+		pick(null, "No color");
+		for (const [value, label] of Object.entries(TASK_COLORS)) pick(value as NamedTaskColor, label);
+		const custom = [...this.palette.custom] as TaskColor[];
+		// A color removed from the palette stays on the text that uses it.
+		const own = this.target.color;
+		if (own && !(own in TASK_COLORS) && !custom.includes(own)) custom.push(own);
+		for (const hex of custom) {
+			pick(hex, `${hex} (right-click to remove)`).addEventListener("contextmenu", (e) => {
+				e.preventDefault();
+				new Menu()
+					.addItem((i) =>
+						i
+							.setTitle("Remove color")
+							.setIcon("trash-2")
+							.onClick(() => {
+								this.palette.custom = this.palette.custom.filter((c) => c !== hex);
+								this.palette.save(this.palette.custom);
+								this.paletteChanged();
+							}),
+					)
+					.showAtMouseEvent(e);
+			});
+		}
+
+		const input = row.createEl("input", { cls: "tg-color-input", attr: { type: "color", tabindex: "-1", "aria-hidden": "true" } });
+		const plus = pressable("Add a color", () => input.click());
+		plus.addClass("is-add");
+		setIcon(plus, "plus");
+		input.addEventListener("change", () => {
+			// A color input always gives "#rrggbb".
+			const hex = input.value.toLowerCase() as TaskColor;
+			if (!this.palette.custom.includes(hex)) {
+				this.palette.custom = [...this.palette.custom, hex];
+				this.palette.save(this.palette.custom);
+			}
+			this.sync();
+			this.applyColor(hex);
+			this.paletteChanged();
+			this.changed();
+		});
+		this.markActive();
+	}
+
+	private markActive(): void {
+		const whole = !this.colors.some((c) => c);
+		for (const w of this.swatches) w.el.toggleClass("is-active", whole && w.value === this.target.color);
 	}
 
 	/**
@@ -285,6 +341,7 @@ export class DayTitleModal extends Modal {
 		app: App,
 		private readonly date: string,
 		current: DayTitleFields,
+		palette: ColorPalette,
 		private readonly onSave: (t: DayTitleFields) => void,
 		/** Given when the heading was written on an earlier day: starts a separate one for today instead. */
 		private readonly onNewToday?: () => void,
@@ -292,8 +349,12 @@ export class DayTitleModal extends Modal {
 		super(app);
 		this.note = { ...DEFAULT_END_NOTE, ...(current.endNote ?? {}) };
 		this.draft = { ...current, endNote: this.note };
-		this.titleField = new LetterColorField(this.draft, "title", () => this.redraw());
-		this.noteField = new LetterColorField(this.note, "words", () => this.redraw());
+		const paletteChanged = () => {
+			this.titleField.drawSwatches();
+			this.noteField.drawSwatches();
+		};
+		this.titleField = new LetterColorField(this.draft, "title", palette, paletteChanged, () => this.redraw());
+		this.noteField = new LetterColorField(this.note, "words", palette, paletteChanged, () => this.redraw());
 	}
 
 	onOpen(): void {

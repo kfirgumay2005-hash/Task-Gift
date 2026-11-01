@@ -1,5 +1,5 @@
 import { App, Menu, Modal, Notice, setIcon } from "obsidian";
-import type { NamedTaskColor, RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, ReminderOffset, ReminderUnit, Task, TaskColor, Weekday } from "../types";
+import type { ColorPalette, NamedTaskColor, RecurrenceEnd, RecurrenceFreq, RecurrencePreset, RecurrenceRule, ReminderOffset, ReminderUnit, Task, TaskColor, Weekday } from "../types";
 import type { TaskStore } from "../sync/store";
 import { firstMatchOnOrAfter, isLastWeekdayOfMonth, nthOfMonth, occurrencesBetween, reminderDate, ruleFromPreset } from "../recurrence/rule";
 import { addDays, addMonths, MONTH_SHORT, ordinal, parseDate, today, WEEKDAY_LONG, WEEKDAY_SHORT, weekday } from "../util/dates";
@@ -14,7 +14,7 @@ export interface TaskModalOptions {
 	task?: Task;
 	defaults?: { listId?: string; due?: string | null };
 	/** Custom colors for the color picker; unset hides the picker (task colors turned off). */
-	colors?: { custom: string[]; save: (custom: string[]) => void };
+	colors?: ColorPalette;
 	/** The modes, for choosing which of them the task may be drawn in. */
 	modes?: { id: string; name: string }[];
 }

@@ -32,7 +32,7 @@ import {
 	TOPICS_NOTE,
 	topicsPathFor,
 } from "./storage/dataFile";
-import type { AuthData, BoardView, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
+import type { AuthData, BoardView, ColorPalette, PluginData, StoreData, Task, TaskGiftSettings } from "./types";
 
 /** The only thing kept in the device-local data.json. */
 interface LocalPointer {
@@ -766,18 +766,20 @@ export default class TaskGiftPlugin extends Plugin {
 	openTaskModal(task?: Task, defaults?: TaskModalOptions["defaults"]): void {
 		// A reminder copies its task, so editing it means editing that task.
 		if (task) task = this.store.reminderTask(task.id) ?? task;
-		const colors =
-			this.settings.taskColorScope === "off"
-				? undefined
-				: {
-						custom: this.settings.customTaskColors,
-						save: (list: string[]) => {
-							this.settings.customTaskColors = list;
-							void this.saveSettings();
-						},
-					};
+		const colors = this.settings.taskColorScope === "off" ? undefined : this.colorPalette();
 		const modes = this.settings.modes.map((m) => ({ id: m.id, name: m.name }));
 		new TaskModal(this.app, this.store, { task, defaults, colors, modes }).open();
+	}
+
+	/** The user's added colors, shared by the task window and the day topic window. */
+	colorPalette(): ColorPalette {
+		return {
+			custom: this.settings.customTaskColors,
+			save: (list) => {
+				this.settings.customTaskColors = list;
+				void this.saveSettings();
+			},
+		};
 	}
 
 	/** Leaves gift mode and shows the board or the calendar. */

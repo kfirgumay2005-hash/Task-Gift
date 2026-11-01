@@ -127,6 +127,12 @@ export type NamedTaskColor = "red" | "orange" | "yellow" | "green" | "cyan" | "b
 /** A built-in color name or a custom "#rrggbb" color. */
 export type TaskColor = NamedTaskColor | `#${string}`;
 
+/** The colors added by the user, offered in the color pickers after the built-in ones. */
+export interface ColorPalette {
+	custom: string[];
+	save: (custom: string[]) => void;
+}
+
 export type DayTitleSize = "small" | "normal" | "large" | "huge";
 
 /** A run of a day heading's text with its own color (null = the heading's color). */
@@ -317,7 +323,7 @@ export interface TaskGiftSettings {
 	boardView: BoardView;
 	calendarRange: CalendarRange;
 	taskColorScope: TaskColorScope;
-	/** Colors added with "+" in the task window ("#rrggbb"). */
+	/** Colors added with "+" in the task window or the day topic window ("#rrggbb"); both offer them all. */
 	customTaskColors: string[];
 	/** Extra day columns of the board grouped by due date. */
 	dayColumns: DayColumn[];
