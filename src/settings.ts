@@ -69,6 +69,17 @@ export class TaskGiftSettingTab extends PluginSettingTab {
 				onReorder: (from, to) => this.changeStickyCommands((list) => list.splice(to, 0, ...list.splice(from, 1)), true),
 			},
 			{ type: "group", items: this.stickyCommandsFooter() },
+			{
+				type: "group",
+				heading: "Sticky note pictures",
+				items: [
+					{
+						name: "Save pictures in",
+						desc: `Where pictures added to the sticky-note board are saved. Obsidian's attachment folder is the one set in Settings → Files and links. The plugin's folder is "Sticky images" next to the plugin's data note. Pictures already added stay where they are.`,
+						control: { type: "dropdown", key: "stickyImagesLocation", options: { attachments: "Obsidian's attachment folder", plugin: "The plugin's folder" } },
+					},
+				],
+			},
 			{ type: "group", heading: "Daily note", items: this.dailyNoteItems() },
 		];
 	}

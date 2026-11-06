@@ -85,6 +85,7 @@ export const DEFAULT_SETTINGS: TaskGiftSettings = {
 	dailyNoteIncludeOverdue: true,
 	dailyNoteInsertedOn: "",
 	stickyCommands: [],
+	stickyImagesLocation: "attachments",
 };
 
 /** The format commands a sticky note starts with; they can be changed or deleted in the settings. */

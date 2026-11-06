@@ -11,6 +11,7 @@ import { TaskModal, TaskModalOptions } from "./modals/TaskModal";
 import { TaskGiftSettingTab } from "./settings";
 import { calendarsFolderFor, CalendarStore } from "./calendars/store";
 import { templatesFolderFor, TemplateStore } from "./calendars/templates";
+import { stickyImagesFolderFor } from "./stickyImages";
 import { CalendarImportModal } from "./modals/CalendarModals";
 import { SyncEngine, SyncStatus } from "./sync/engine";
 import { ChangeSource, DUPLICATE_CHECK_MONTHS, TaskStore } from "./sync/store";
@@ -297,6 +298,7 @@ export default class TaskGiftPlugin extends Plugin {
 		else s.collapsedColumns = raw.collapsedColumns.filter((k): k is string => typeof k === "string");
 		delete (s as unknown as Record<string, unknown>).showCompleted;
 		if (!Array.isArray(s.customTaskColors)) s.customTaskColors = [];
+		if (s.stickyImagesLocation !== "attachments" && s.stickyImagesLocation !== "plugin") s.stickyImagesLocation = DEFAULT_SETTINGS.stickyImagesLocation;
 		// Missing = never set up: start with the default commands. An empty list means the user deleted them all.
 		s.stickyCommands = Array.isArray(raw?.stickyCommands)
 			? raw.stickyCommands
@@ -792,6 +794,11 @@ export default class TaskGiftPlugin extends Plugin {
 	async setGiftMode(on: boolean): Promise<void> {
 		this.settings.giftMode = on;
 		await this.saveSettings();
+	}
+
+	/** Where pictures put on the sticky-note board are saved (next to the data note, so they sync). */
+	stickyImagesFolder(): string {
+		return stickyImagesFolderFor(this.dataFile.path);
 	}
 
 	refreshViews(): void {

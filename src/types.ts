@@ -197,8 +197,12 @@ export interface StickyCommand {
 export type StickyColor = NamedTaskColor | "default";
 
 /** A note stuck on the empty part of the board, placed freely. Local only: it never reaches Google. */
+export type StickyImagesLocation = "attachments" | "plugin";
+
 export interface StickyNote {
 	text: string;
+	/** Vault path of a picture: the note shows it instead of text (older versions show an empty note). */
+	image?: string;
 	/** "default" = Obsidian's own neutral background. */
 	color: StickyColor;
 	/** Position and size in px inside the sticky-note area (at 100% board zoom). */
@@ -336,6 +340,8 @@ export interface TaskGiftSettings {
 	dailyNoteInsertedOn: string;
 	/** Format commands in a sticky note's menu, in menu order. */
 	stickyCommands: StickyCommand[];
+	/** Where pictures added to the sticky-note board are saved: Obsidian's attachment folder, or next to the plugin's data note. */
+	stickyImagesLocation: StickyImagesLocation;
 }
 
 export interface AuthData {

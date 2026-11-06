@@ -5,6 +5,8 @@ import { TASK_COLORS } from "../defaults";
 import { ConfirmModal } from "../modals/ConfirmModal";
 import type { BoardUiState } from "./board";
 import { commandRegistry, isEditorOnly, stickyEditFor, TextEdit, wrapSelection } from "../stickyCommands";
+import { IMAGE_EXTENSIONS, imageFile, imageFiles, imageSize, isImageFile as isImage, saveStickyImage } from "../stickyImages";
+import { pickFiles } from "../util/importFiles";
 
 const STICKY_WIDTH = 200;
 const STICKY_HEIGHT = 170;
@@ -15,6 +17,48 @@ const AREA_MARGIN = 40;
 const CASCADE = 24;
 /** Icons of the default text-marker commands (Obsidian commands bring their own). */
 const DEFAULT_COMMAND_ICONS: Record<string, string> = { highlight: "highlighter", underline: "underline", bold: "bold" };
+/** A new picture on the board fits in this square (keeping its shape). */
+const IMAGE_FIT = 240;
+/** Height of a picture note's top bar (fixed in styles.css: `.tg-sticky.is-image .tg-sticky-bar`). */
+const BAR_HEIGHT = 28;
+/** A picture note's border (1px) and padding (4px) around the image, both sides together (see styles.css). */
+const IMAGE_FRAME = 10;
+/** How often a picture that hasn't arrived from the other device yet is looked for again. */
+const MISSING_IMAGE_POLL_MS = 3000;
+
+/** Note size that shows a w × h picture at the given scale. */
+function imageNoteSize(w: number, h: number, scale: number): { w: number; h: number } {
+	return { w: Math.max(STICKY_MIN, Math.round(w * scale) + IMAGE_FRAME), h: Math.max(STICKY_MIN, Math.round(h * scale) + BAR_HEIGHT + IMAGE_FRAME) };
+}
+
+/** Scale at which a new picture fits in IMAGE_FIT (never enlarged). */
+function fitScale(w: number, h: number): number {
+	return Math.min(1, IMAGE_FIT / Math.max(w, h));
+}
+
+function errorText(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
+}
+
+/** Copies the pictures into the vault and resolves with their paths (failures are reported and skipped). */
+async function savePictures(plugin: TaskGiftPlugin, files: File[]): Promise<{ path: string; file: File }[]> {
+	const saved: { path: string; file: File }[] = [];
+	for (const file of files) {
+		try {
+			saved.push({ path: await saveStickyImage(plugin.app, plugin.settings.stickyImagesLocation === "plugin" ? plugin.stickyImagesFolder() : null, file), file });
+		} catch (e) {
+			new Notice(`Could not add the picture "${file.name}": ${errorText(e)}`);
+		}
+	}
+	return saved;
+}
+
+/** Markdown that shows a picture inside a note's text: just its name when that's unique in the vault, else its path. */
+function embedFor(plugin: TaskGiftPlugin, path: string): string {
+	const file = imageFile(plugin.app, path);
+	const cache = plugin.app.metadataCache as typeof plugin.app.metadataCache | undefined;
+	return "![[" + (file && cache ? cache.fileToLinktext(file, "") : path) + "]]";
+}
 
 /**
  * The empty side of the board, after the columns: sticky notes placed freely. Drag a note by its top bar,
@@ -28,6 +72,9 @@ export function renderStickies(board: HTMLElement, plugin: TaskGiftPlugin, ui: B
 	const addBtn = toolbar.createDiv({ cls: "tg-stickies-add", attr: { role: "button", tabindex: "0", "aria-label": "Add a sticky note" } });
 	setIcon(addBtn.createSpan(), "sticky-note");
 	addBtn.createSpan({ text: "Add sticky note" });
+	const imageBtn = toolbar.createDiv({ cls: "tg-stickies-add", attr: { role: "button", tabindex: "0", "aria-label": "Add a picture" } });
+	setIcon(imageBtn.createSpan(), "image-plus");
+	imageBtn.createSpan({ text: "Add image" });
 	const canvas = area.createDiv({ cls: "tg-stickies-canvas" });
 
 	const notes = store.stickyNotes();
@@ -51,10 +98,53 @@ export function renderStickies(board: HTMLElement, plugin: TaskGiftPlugin, ui: B
 		const n = notes.length % 8;
 		add(16 + n * CASCADE, area.scrollTop / zoom() + 8 + n * CASCADE);
 	});
-	addBtn.addEventListener("keydown", (e) => {
-		if (e.key !== "Enter" && e.key !== " ") return;
+	for (const btn of [addBtn, imageBtn]) {
+		btn.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter" && e.key !== " ") return;
+			e.preventDefault();
+			btn.click();
+		});
+	}
+
+	/** Puts pictures on the board as their own notes, the first at (x, y), the others stacked after it. */
+	const addImages = async (files: File[], x: number, y: number) => {
+		const saved = await savePictures(plugin, files);
+		if (!saved.length) return;
+		let i = 0;
+		for (const { path, file } of saved) {
+			const size = await imageSize(file);
+			const { w, h } = size ? imageNoteSize(size.w, size.h, fitScale(size.w, size.h)) : imageNoteSize(IMAGE_FIT, IMAGE_FIT, 1);
+			store.addSticky({ text: "", image: path, color: "default", x: Math.max(0, Math.round(x + i * CASCADE)), y: Math.max(0, Math.round(y + i * CASCADE)), w, h });
+			i++;
+		}
+		plugin.touch();
+	};
+	imageBtn.addEventListener("click", () => {
+		const n = notes.length % 8;
+		const x = 16 + n * CASCADE;
+		const y = area.scrollTop / zoom() + 8 + n * CASCADE;
+		void pickFiles(IMAGE_EXTENSIONS, true).then((files) => addImages(files.filter(isImage), x, y));
+	});
+
+	// Pictures dropped on the empty board become notes of their own (dropped on a note, they go into its text).
+	const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+	canvas.addEventListener("dragover", (e) => {
+		if (!hasFiles(e)) return;
 		e.preventDefault();
-		addBtn.click();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+		canvas.addClass("is-drop-target");
+	});
+	canvas.addEventListener("dragleave", (e) => {
+		if (!canvas.contains(e.relatedTarget as Node | null)) canvas.removeClass("is-drop-target");
+	});
+	canvas.addEventListener("drop", (e) => {
+		canvas.removeClass("is-drop-target");
+		const files = imageFiles(e.dataTransfer?.files);
+		if (!files.length) return;
+		e.preventDefault();
+		const rect = canvas.getBoundingClientRect();
+		const z = zoom();
+		void addImages(files, (e.clientX - rect.left) / z - 40, (e.clientY - rect.top) / z - 12);
 	});
 	canvas.addEventListener("dblclick", (e) => {
 		if (e.target !== canvas && !(e.target as HTMLElement).hasClass("tg-stickies-hint")) return;
@@ -76,14 +166,32 @@ function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSt
 	el.style.top = `${n.y}px`;
 	el.style.width = `${n.w}px`;
 	el.style.height = `${n.h}px`;
+	if (n.image) el.addClass("is-image");
 
 	const bar = el.createDiv({ cls: "tg-sticky-bar", attr: { "aria-label": "Drag to move" } });
 	bar.createDiv({ cls: "tg-spacer" });
 	const commandsEl = bar.createDiv({ cls: "tg-sticky-commands" });
 	const menuBtn = bar.createDiv({ cls: "clickable-icon tg-sticky-tool", attr: { role: "button", "aria-label": "Color" } });
 	setIcon(menuBtn, "palette");
-	const delBtn = bar.createDiv({ cls: "clickable-icon tg-sticky-tool", attr: { role: "button", "aria-label": "Delete sticky note" } });
+	const delBtn = bar.createDiv({ cls: "clickable-icon tg-sticky-tool", attr: { role: "button", "aria-label": n.image ? "Delete picture" : "Delete sticky note" } });
 	setIcon(delBtn, "x");
+	addMoveAndResize(el, bar, plugin, id, n, zoom);
+	addColorMenu(menuBtn, plugin, id, n);
+
+	if (n.image) {
+		renderImage(el, bar, menuBtn, plugin, id, n, n.image);
+		delBtn.addEventListener("mousedown", (e) => e.preventDefault());
+		delBtn.addEventListener("click", () => {
+			const path = n.image ?? "";
+			new ConfirmModal(plugin.app, "Delete picture?", "It will be gone from the board on every device, and its file goes to the trash.", "Delete", () => {
+				store.deleteSticky(id);
+				plugin.touch();
+				const file = imageFile(plugin.app, path);
+				if (file) void plugin.app.fileManager.trashFile(file).catch((e: unknown) => new Notice(`Could not move the picture to the trash: ${errorText(e)}`));
+			}).open();
+		});
+		return;
+	}
 
 	// Shown rendered (bold, highlight, links…); clicking it switches to the Markdown text.
 	const view = el.createDiv({ cls: "tg-sticky-view markdown-rendered", attr: { dir: "auto" } });
@@ -141,6 +249,45 @@ function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSt
 		text.blur();
 	});
 
+	/** Saves the pictures and puts them into the text where the caret was (or at the end when not editing). */
+	const insertPictures = async (files: File[], start: number, end: number) => {
+		const saved = await savePictures(plugin, files);
+		if (!saved.length) return;
+		const value = text.value;
+		start = Math.min(start, value.length);
+		end = Math.min(end, value.length);
+		const before = value.slice(0, start);
+		const lead = before && !before.endsWith("\n") ? "\n" : "";
+		const embeds = lead + saved.map((s) => embedFor(plugin, s.path)).join("\n") + "\n";
+		text.value = before + embeds + value.slice(end);
+		store.updateSticky(id, { text: text.value });
+		plugin.saveLater();
+		startEdit();
+		const caret = start + embeds.length;
+		text.setSelectionRange(caret, caret);
+	};
+	text.addEventListener("paste", (e) => {
+		const files = imageFiles(e.clipboardData?.files);
+		if (!files.length) return;
+		e.preventDefault();
+		void insertPictures(files, text.selectionStart, text.selectionEnd);
+	});
+	el.addEventListener("dragover", (e) => {
+		if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
+		e.preventDefault();
+		e.stopPropagation();
+		e.dataTransfer.dropEffect = "copy";
+	});
+	el.addEventListener("drop", (e) => {
+		const files = imageFiles(e.dataTransfer?.files);
+		if (!files.length) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const editing = el.hasClass("is-editing");
+		const len = text.value.length;
+		void insertPictures(files, editing ? text.selectionStart : len, editing ? text.selectionEnd : len);
+	});
+
 	const runCommand = (cmd: StickyCommand) => {
 		const edit = cmd.commandId ? stickyEditFor(cmd.commandId) : (v: string, s: number, e: number) => wrapSelection(v, s, e, cmd.before, cmd.after);
 		if (!edit) return runObsidianCommand(cmd);
@@ -186,6 +333,20 @@ function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSt
 		btn.addEventListener("click", () => runCommand(cmd));
 	}
 
+	delBtn.addEventListener("mousedown", (e) => e.preventDefault());
+	delBtn.addEventListener("click", () => {
+		const remove = () => {
+			store.deleteSticky(id);
+			plugin.touch();
+		};
+		if (!text.value.trim()) return remove();
+		new ConfirmModal(plugin.app, "Delete sticky note?", "Its text will be gone on every device.", "Delete", remove).open();
+	});
+}
+
+/** The color button's menu (default, or one of the task colors). */
+function addColorMenu(menuBtn: HTMLElement, plugin: TaskGiftPlugin, id: string, n: StickyNote): void {
+	const store = plugin.store;
 	menuBtn.addEventListener("mousedown", (e) => e.preventDefault());
 	menuBtn.addEventListener("click", (e) => {
 		const menu = new Menu();
@@ -203,16 +364,60 @@ function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSt
 		}
 		menu.showAtMouseEvent(e);
 	});
-	delBtn.addEventListener("mousedown", (e) => e.preventDefault());
-	delBtn.addEventListener("click", () => {
-		const remove = () => {
-			store.deleteSticky(id);
-			plugin.touch();
-		};
-		if (!text.value.trim()) return remove();
-		new ConfirmModal(plugin.app, "Delete sticky note?", "Its text will be gone on every device.", "Delete", remove).open();
-	});
+}
 
+/** A picture note: the image fills the note, keeping its shape. Double-click opens it in a tab. */
+function renderImage(el: HTMLElement, bar: HTMLElement, beforeBtn: HTMLElement, plugin: TaskGiftPlugin, id: string, n: StickyNote, path: string): void {
+	const box = el.createDiv({ cls: "tg-sticky-image" });
+	const file = imageFile(plugin.app, path);
+	if (!file) {
+		// Not synced from the other device yet: look again now and then, and redraw once it's there.
+		box.createDiv({ cls: "tg-sticky-placeholder", text: "Picture not here yet (still syncing?)" });
+		const timer = window.setInterval(() => {
+			if (!el.isConnected) return window.clearInterval(timer);
+			if (!imageFile(plugin.app, path)) return;
+			window.clearInterval(timer);
+			plugin.refreshViews();
+		}, MISSING_IMAGE_POLL_MS);
+		return;
+	}
+	const img = box.createEl("img", { attr: { src: plugin.app.vault.getResourcePath(file), alt: file.basename, draggable: "false" } });
+	img.addEventListener("error", () => {
+		img.remove();
+		box.createDiv({ cls: "tg-sticky-placeholder", text: `Can't show "${file.name}"` });
+	});
+	box.addEventListener("dblclick", () => void plugin.app.workspace.getLeaf("tab").openFile(file));
+
+	// Expand: the note grows to the picture's own full size; pressed again (at full size) it shrinks back to the fit size.
+	const expandBtn = bar.createDiv({ cls: "clickable-icon tg-sticky-tool tg-sticky-expand", attr: { role: "button" } });
+	bar.insertBefore(expandBtn, beforeBtn);
+	const fullSize = () => (img.naturalWidth ? imageNoteSize(img.naturalWidth, img.naturalHeight, 1) : null);
+	const isFull = () => {
+		const full = fullSize();
+		return !!full && n.w === full.w && n.h === full.h;
+	};
+	const showState = () => {
+		const full = isFull();
+		expandBtn.empty();
+		setIcon(expandBtn, full ? "minimize-2" : "maximize-2");
+		expandBtn.setAttr("aria-label", full ? "Shrink back" : "Expand to the picture's full size");
+	};
+	showState();
+	img.addEventListener("load", showState);
+	expandBtn.addEventListener("mousedown", (e) => e.preventDefault());
+	expandBtn.addEventListener("click", () => {
+		const full = fullSize();
+		if (!full) return;
+		const size = isFull() ? imageNoteSize(img.naturalWidth, img.naturalHeight, fitScale(img.naturalWidth, img.naturalHeight)) : full;
+		// Saved like a resize, so the other device gets it too.
+		plugin.store.updateSticky(id, size);
+		plugin.touch();
+	});
+}
+
+/** Moving by the top bar and resizing from the corner; both are saved on release. */
+function addMoveAndResize(el: HTMLElement, bar: HTMLElement, plugin: TaskGiftPlugin, id: string, n: StickyNote, zoom: () => number): void {
+	const store = plugin.store;
 	// --- move by the top bar
 	bar.addEventListener("pointerdown", (e) => {
 		if (e.button !== 0 || (e.target as HTMLElement).closest(".tg-sticky-tool")) return;

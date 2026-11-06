@@ -136,6 +136,13 @@ not in the settings note (otherwise two devices write the settings note at once 
   Obsidian's editor commands can't reach the sticky textarea, so `src/stickyCommands.ts` redoes the formatting ones
   on the Markdown (`stickyEditFor`); other commands run via `executeCommandById`.
   Test: `dev/ui-test/stickies.test.mjs`.
+- Pictures on the sticky board: "Add image" or dropping a picture on the empty board makes a picture note (a `StickyNote`
+  with `image` = vault path; moved/resized/merged like any note, double-click opens it, delete trashes the file; its
+  expand button sizes the note to the picture's full size and back — bar/frame sizes are fixed in CSS to match
+  `BAR_HEIGHT`/`IMAGE_FRAME`). Pasting or
+  dropping a picture into a text note embeds it (`![[name]]`). Files go to Obsidian's attachment folder (default) or, by
+  `settings.stickyImagesLocation: "plugin"`, to `Sticky images/` next to the data note (`src/stickyImages.ts`); a picture not synced yet shows a placeholder and is looked for every 3 s.
+  Test: `dev/ui-test/sticky-images.test.mjs`.
 - Reminders (up to `MAX_REMINDERS`, days/weeks/months before a task, set in `TaskModal`) are real separate tasks in
   Google, titled `🔔 <title>`. `store.reminders` is keyed by the main task (`{rules, updated}`, merged per task by
   `updated`, cleared = empty `rules`); each rule keeps its `taskId` and the `date` last placed. `store.syncReminders`

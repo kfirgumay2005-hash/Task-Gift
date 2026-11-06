@@ -2671,6 +2671,64 @@
 	background: transparent;
 }
 
+/* Pictures: their own notes on the board, or embedded in a note's text. */
+.tg-sticky-image {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	padding: 4px;
+	cursor: zoom-in;
+}
+
+/* Fixed sizes, so the expand button can make the note fit the picture exactly (BAR_HEIGHT, IMAGE_FRAME in stickies.ts). */
+.tg-sticky.is-image {
+	border-width: 1px;
+}
+
+.tg-sticky.is-image .tg-sticky-bar {
+	box-sizing: border-box;
+	height: 28px;
+	min-height: 0;
+}
+
+.tg-sticky.is-image .tg-sticky-image {
+	box-sizing: border-box;
+	padding: 4px;
+}
+
+.tg-sticky-image img {
+	display: block;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+	border-radius: 2px;
+	user-select: none;
+	-webkit-user-drag: none;
+}
+
+.tg-sticky-image .tg-sticky-placeholder {
+	padding: 8px;
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+}
+
+.tg-sticky-view img {
+	max-width: 100%;
+	height: auto;
+}
+
+.tg-stickies-toolbar {
+	gap: 6px;
+}
+
+.tg-stickies-canvas.is-drop-target {
+	outline: 2px dashed var(--interactive-accent);
+	outline-offset: -4px;
+}
+
 .is-mobile .tg-stickies {
 	flex-basis: 82vw;
 	scroll-snap-align: start;

@@ -1,7 +1,7 @@
 import { App, Notice } from "obsidian";
 
 /** Opens the system file picker (computer or phone) and resolves with the chosen files (none if cancelled). */
-function pickFiles(extensions: string[], multiple: boolean): Promise<File[]> {
+export function pickFiles(extensions: string[], multiple: boolean): Promise<File[]> {
 	return new Promise((resolve) => {
 		// The input has to be in the document: a detached one may never open or report the selection (notably on mobile).
 		const input = activeDocument.body.createEl("input", {
