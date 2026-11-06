@@ -56,6 +56,14 @@ export async function openPage(pageFile, { port = 9334 } = {}) {
 			await cmd("Input.dispatchMouseEvent", { type: "mouseMoved", x: x1, y: y1, button: "left", buttons: 1 });
 			await mouse("mouseReleased", x1, y1);
 		},
+		/** A one-finger drag (touch events, as on the phone). */
+		touchDrag: async (x0, y0, x1, y1) => {
+			const pt = (x, y) => [{ x, y, id: 1 }];
+			await cmd("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: pt(x0, y0) });
+			await cmd("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: pt((x0 + x1) / 2, (y0 + y1) / 2) });
+			await cmd("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: pt(x1, y1) });
+			await cmd("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+		},
 		/** Center of the first element matching `selector` (or the n-th with `n`). */
 		center: (selector, n = 0) => ev(`(()=>{const b=document.querySelectorAll(${JSON.stringify(selector)})[${n}].getBoundingClientRect();return [b.x+b.width/2,b.y+b.height/2]})()`),
 		type: async (text) => { for (const ch of text) await cmd("Input.insertText", { text: ch }); },

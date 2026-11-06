@@ -2514,7 +2514,6 @@
 	min-width: 110px;
 	min-height: 110px;
 	overflow: hidden;
-	resize: both;
 	border-radius: 4px 4px 4px 14px;
 	background: color-mix(in srgb, var(--tg-sticky-color) 32%, var(--background-primary));
 	border: 1px solid color-mix(in srgb, var(--tg-sticky-color) 55%, transparent);
@@ -2530,6 +2529,25 @@
 
 .tg-sticky.is-neutral .tg-sticky-bar {
 	background: var(--background-modifier-hover);
+}
+
+/* Corner handle for resizing (works with mouse and touch; CSS `resize` has no handle on the phone). */
+.tg-sticky-resize {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 22px;
+	height: 22px;
+	cursor: nwse-resize;
+	touch-action: none;
+	z-index: 2;
+	background: linear-gradient(135deg, transparent 55%, var(--text-faint) 55%, var(--text-faint) 62%, transparent 62%, transparent 72%, var(--text-faint) 72%, var(--text-faint) 79%, transparent 79%);
+	opacity: 0.6;
+}
+
+.tg-sticky.is-resizing {
+	box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+	z-index: 1;
 }
 
 .tg-sticky.is-moving {

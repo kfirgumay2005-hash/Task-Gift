@@ -37,6 +37,14 @@ try {
 	await page.sleep(100);
 	n = await notes();
 	check("resizing from the corner saves the size", Math.abs(n[0][1].w - 260) <= 4 && Math.abs(n[0][1].h - 207) <= 4, [n[0][1].w, n[0][1].h]);
+	check("the size is kept on screen after the resize", await page.ev(`document.querySelector('.tg-sticky').style.width`) === `${n[0][1].w}px`, await page.ev(`document.querySelector('.tg-sticky').style.width`));
+	// On the phone: a finger on the corner handle (no CSS resize handle there).
+	const [gx, gy] = await page.center(".tg-sticky-resize");
+	await page.touchDrag(gx, gy, gx - 40, gy + 30);
+	await page.sleep(100);
+	const n2 = await notes();
+	check("resizing with a finger saves the size", Math.abs(n2[0][1].w - (n[0][1].w - 40)) <= 2 && Math.abs(n2[0][1].h - (n[0][1].h + 30)) <= 2, [n2[0][1].w, n2[0][1].h]);
+	n = n2;
 
 	// Format commands from the palette menu: select a word, run Bold, see it rendered; run again to remove it.
 	const textOf = async () => (await notes())[0][1].text;

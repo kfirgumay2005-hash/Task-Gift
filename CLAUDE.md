@@ -55,6 +55,11 @@ contenteditable) instead of the real one: a method named `selection()` in the mo
 The user syncs the vault with **Self-hosted LiveSync** on two computers. What works:
 
 1. **Data lives in vault notes, not `data.json`.** `data.json` only points to the data note.
+   **Rule: everything the plugin saves (settings, tasks, stickies with their position/size, view state that should
+   follow the user…) goes into the data note whose location is chosen in the settings (`dataFilePath`) or its sibling
+   notes next to it — never into `data.json`, `localStorage` or other per-device storage.** Vault notes sync
+   immediately through LiveSync; `data.json` syncs poorly between the devices. Only purely per-device things may
+   stay local, and say so in the code.
    - `Task Gift Settings.md`: settings only (incl. modes). Changes only when a setting changes.
    - `Task Gift Data.md`: tasks, sync state, sign-in. Rewritten on every sync. Still carries a copy of the
      settings for older plugin versions, but that copy is **ignored** when the data note arrives from another device.
@@ -121,7 +126,9 @@ not in the settings note (otherwise two devices write the settings note at once 
 - Modes are switched and edited only from gift mode (the Modes tab and the mode chip show only there).
 - Sticky notes fill the board's empty side after the columns (`views/stickies.ts`). They live in the store
   (`stickies`, merged per note by `updated`, deleted = tombstone; color `"default"` = Obsidian's neutral background, the default for new notes) and are saved in the topics note next to the
-  day topics. Typing saves without redrawing (`plugin.saveLater`); `TaskView.renderBoardBody` keeps the caret when a
+  day topics. Moving (top bar) and resizing (the `.tg-sticky-resize` corner handle,
+  pointer events with capture) save `x/y/w/h` on release; don't go back to CSS `resize: both`: the phone has no
+  handle for it and its size was never saved. Typing saves without redrawing (`plugin.saveLater`); `TaskView.renderBoardBody` keeps the caret when a
   sync redraws. A note is Markdown: rendered (`MarkdownRenderer`) until clicked, then a textarea. Its top bar
   shows `settings.stickyCommands` as buttons next to the color (palette) button (defaults Highlight, Underline, Bold; edited in the settings tab as a
   `type: "list"` group, missing = defaults, empty = all deleted). A command is text markers (wrap/unwrap the

@@ -246,12 +246,41 @@ function renderSticky(canvas: HTMLElement, plugin: TaskGiftPlugin, ui: BoardUiSt
 		bar.addEventListener("pointercancel", end);
 	});
 
-	// --- resize from the corner (CSS resize sets the inline size; save it when the mouse is let go)
-	el.addEventListener("pointerup", () => {
-		const w = Math.max(STICKY_MIN, Math.round(parseFloat(el.style.width) || n.w));
-		const h = Math.max(STICKY_MIN, Math.round(parseFloat(el.style.height) || n.h));
-		if (w === n.w && h === n.h) return;
-		store.updateSticky(id, { w, h });
-		plugin.touch();
+	// --- resize from the corner handle. Pointer events (not CSS `resize`), so it works with a finger on the phone
+	// too: the mobile app has no native resize handle, and the size it showed was never saved.
+	const grip = el.createDiv({ cls: "tg-sticky-resize", attr: { "aria-label": "Drag to resize" } });
+	grip.addEventListener("pointerdown", (e) => {
+		if (e.pointerType === "mouse" && e.button !== 0) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const z = zoom();
+		const startX = e.clientX;
+		const startY = e.clientY;
+		const w0 = n.w;
+		const h0 = n.h;
+		let w = w0;
+		let h = h0;
+		grip.setPointerCapture(e.pointerId);
+		el.addClass("is-resizing");
+		const move = (ev: PointerEvent) => {
+			w = Math.max(STICKY_MIN, Math.round(w0 + (ev.clientX - startX) / z));
+			h = Math.max(STICKY_MIN, Math.round(h0 + (ev.clientY - startY) / z));
+			el.style.width = `${w}px`;
+			el.style.height = `${h}px`;
+		};
+		const end = (ev: PointerEvent) => {
+			if (ev.type === "pointerup") move(ev);
+			grip.removeEventListener("pointermove", move);
+			grip.removeEventListener("pointerup", end);
+			grip.removeEventListener("pointercancel", end);
+			el.removeClass("is-resizing");
+			if (w === w0 && h === h0) return;
+			// Saved in the store, i.e. the topics note next to the data note, so the other device gets it.
+			store.updateSticky(id, { w, h });
+			plugin.touch();
+		};
+		grip.addEventListener("pointermove", move);
+		grip.addEventListener("pointerup", end);
+		grip.addEventListener("pointercancel", end);
 	});
 }
