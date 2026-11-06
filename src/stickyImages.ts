@@ -35,7 +35,7 @@ export async function saveStickyImage(app: App, folder: string | null, file: Fil
 	// Pasted pictures are all called "image.png": name them by the time instead.
 	const d = new Date();
 	const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-	const given = file.name.replace(/\.[^.]*$/, "").replace(/[\/:*?"<>|#^[\]]/g, "").trim();
+	const given = file.name.replace(/\.[^.]*$/, "").replace(/[\\/:*?"<>|#^[\]]/g, "").trim();
 	const base = !given || given === "image" ? `Image ${stamp}` : given;
 	let path: string;
 	if (folder === null) {
