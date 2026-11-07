@@ -111,3 +111,41 @@ export class Setting {
 		return this;
 	}
 }
+
+// --- For loading the whole plugin (main.ts), e.g. in the two-device sync test.
+export function debounce(fn, ms = 0, resetTimer = false) {
+	let t = null;
+	let last = null;
+	const d = (...args) => {
+		last = args;
+		if (t !== null && !resetTimer) return d;
+		if (t !== null) clearTimeout(t);
+		t = setTimeout(() => { t = null; fn(...last); }, ms);
+		return d;
+	};
+	d.cancel = () => { if (t !== null) clearTimeout(t); t = null; return d; };
+	d.run = () => { if (t !== null) { clearTimeout(t); t = null; fn(...last); } };
+	return d;
+}
+export class TAbstractFile {}
+export class TFolder extends TAbstractFile {}
+export class Plugin extends Component {
+	constructor(app, manifest) { super(); this.app = app; this.manifest = manifest; this._intervals = []; }
+	registerEvent() {}
+	registerView() {}
+	addRibbonIcon() { return document.createElement("div"); }
+	addCommand() {}
+	addSettingTab() {}
+	registerInterval(id) { this._intervals.push(id); return id; }
+	registerDomEvent(el, type, cb) { el.addEventListener(type, cb); }
+	async loadData() { return this._data ?? null; }
+	async saveData(d) { this._data = d; }
+}
+export class PluginSettingTab {
+	constructor(app, plugin) { this.app = app; this.plugin = plugin; this.containerEl = document.createElement("div"); this.containerEl.isShown = () => false; }
+	update() {}
+}
+export class ItemView extends Component {}
+export class FuzzySuggestModal extends Modal {}
+export const requestUrl = async () => { throw new Error("no network in tests"); };
+export const moment = () => ({ format: () => "" });

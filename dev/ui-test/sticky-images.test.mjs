@@ -46,6 +46,8 @@ try {
 	check("expand grows the note to the picture's full size", n[0][1].w === 480 + 10 && n[0][1].h === 240 + 28 + 10, [n[0][1].w, n[0][1].h]);
 	check("the picture is shown at its full size", JSON.stringify(await imgBox()) === "[480,240]", await imgBox());
 	check("the button now shrinks", (await page.ev(`document.querySelector('.tg-sticky-expand').getAttribute('aria-label')`)) === "Shrink back", null);
+	// A full-size picture can reach past the visible area: scroll to its button, as you would.
+	await page.ev(`document.querySelector('.tg-sticky-expand').scrollIntoView({ block: "nearest", inline: "nearest" })`);
 	await page.click(...(await page.center(".tg-sticky.is-image .tg-sticky-expand")));
 	await page.sleep(100);
 	n = await notes();
