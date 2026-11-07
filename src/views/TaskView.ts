@@ -4,7 +4,9 @@ import { VIEW_TYPE } from "../defaults";
 import { describeFilter } from "../filters/dates";
 import { activeMode } from "../modes";
 import { BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from "../defaults";
+import { CapsuleModal, type CapsuleMedia, type TopicCapsules } from "../modals/CapsuleModal";
 import { DEFAULT_DAY_TITLE, DayTitleModal, renderDayTitle, renderDayTitleEnd, type DayTitleFields } from "../modals/DayTitleModal";
+import { imageFile, saveStickyImage } from "../stickyImages";
 import type { SyncStatus } from "../sync/engine";
 import type { Grouping } from "../types";
 import { nowTime, today } from "../util/dates";
@@ -357,6 +359,48 @@ export class TaskView extends ItemView {
 			e.preventDefault();
 			btn.click();
 		});
+		const app = this.app;
+		const plugin = this.plugin;
+		// The capsule's files go where the sticky board's pictures go (the same setting).
+		const media: CapsuleMedia = {
+			save: (file) => saveStickyImage(app, plugin.settings.stickyImagesLocation === "plugin" ? plugin.stickyImagesFolder() : null, file),
+			url: (path) => {
+				const f = imageFile(app, path);
+				return f ? app.vault.getResourcePath(f) : null;
+			},
+			open: (path) => {
+				const f = imageFile(app, path);
+				if (f) void app.workspace.getLeaf(true).openFile(f);
+			},
+		};
+		// Time capsules stay sealed: the button shows up only on their day, and is the only way to open them.
+		const opening = store.capsulesOpeningOn(date);
+		if (opening.length) {
+			const open = slot.createDiv({
+				cls: "tg-day-capsule-btn clickable-icon",
+				attr: { role: "button", tabindex: "0", "aria-label": opening.length === 1 ? "Open today's time capsule" : `Open today's ${opening.length} time capsules` },
+			});
+			setIcon(open, "package-open");
+			if (opening.length > 1) open.createSpan({ cls: "tg-day-capsule-count", text: String(opening.length) });
+			open.addEventListener("click", () => new CapsuleModal(app, opening.map(([, c]) => c), media).open());
+			open.addEventListener("keydown", (e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				e.preventDefault();
+				open.click();
+			});
+		}
+		const capsules: TopicCapsules = {
+			pending: () => store.pendingCapsules(today()),
+			add: (fields) => {
+				store.addCapsule(fields);
+				plugin.touch();
+			},
+			remove: (id) => {
+				store.deleteCapsule(id);
+				plugin.touch();
+			},
+			media,
+		};
 		const save = (start: string) => (t: DayTitleFields) => {
 			store.setDayTitle(start, t);
 			this.plugin.touch();
@@ -364,13 +408,14 @@ export class TaskView extends ItemView {
 		// A new topic starts with the last heading's style, not its text, letter colors or end.
 		const fresh = () => {
 			const last = store.lastDayTitle();
-			new DayTitleModal(this.app, date, { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined, untilTime: undefined }, this.plugin.colorPalette(), save(date)).open();
+			const style = { ...DEFAULT_DAY_TITLE, ...(last ?? {}), text: "", parts: undefined, until: undefined, untilTime: undefined };
+			new DayTitleModal(this.app, date, style, this.plugin.colorPalette(), save(date), undefined, capsules).open();
 		};
 		btn.addEventListener("click", () => {
 			if (!active) return fresh();
 			// A topic that lasts from an earlier day is edited where it was written.
 			const earlier = active.start !== date;
-			new DayTitleModal(this.app, active.start, active.title, this.plugin.colorPalette(), save(active.start), earlier ? fresh : undefined).open();
+			new DayTitleModal(this.app, active.start, active.title, this.plugin.colorPalette(), save(active.start), earlier ? fresh : undefined, capsules).open();
 		});
 	}
 

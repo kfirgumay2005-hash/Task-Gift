@@ -105,6 +105,7 @@ export default class TaskGiftPlugin extends Plugin {
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
 		this.store.migratePauses();
 		if (this.loadedTopics) this.mergeTopics(this.loadedTopics);
+		this.store.migrateTopicCapsules();
 		this.shownTopic = this.topicKey();
 		this.api = new TasksApi(() => this.accessToken());
 		this.engine = new SyncEngine(this.api, this.store, () => this.settings, () => this.auth !== null, {
@@ -325,6 +326,7 @@ export default class TaskGiftPlugin extends Plugin {
 		if (!store.reminders || typeof store.reminders !== "object") store.reminders = {};
 		if (!store.dayTitles || typeof store.dayTitles !== "object") store.dayTitles = {};
 		if (!store.stickies || typeof store.stickies !== "object") store.stickies = {};
+		if (!store.capsules || typeof store.capsules !== "object") store.capsules = {};
 		if (!store.paused || typeof store.paused !== "object") store.paused = {};
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
 		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
@@ -365,7 +367,7 @@ export default class TaskGiftPlugin extends Plugin {
 	private async readTopics(): Promise<StoredTopics | null> {
 		const topics = await this.topicsFile.read();
 		if (!topics?.dayTitles || typeof topics.dayTitles !== "object") return null;
-		this.topicsFile.adopt(topicsData(topics.dayTitles, topics.stickies ?? {}));
+		this.topicsFile.adopt(topicsData(topics.dayTitles, topics.stickies ?? {}, topics.capsules ?? {}));
 		return topics;
 	}
 
@@ -373,7 +375,8 @@ export default class TaskGiftPlugin extends Plugin {
 	private mergeTopics(topics: StoredTopics): boolean {
 		const titles = this.store.mergeDayTitles(topics.dayTitles);
 		const stickies = this.store.mergeStickies(topics.stickies);
-		return titles || stickies;
+		const capsules = this.store.mergeCapsules(topics.capsules);
+		return titles || stickies || capsules;
 	}
 
 	/** Called on layout ready: adopt a data note found elsewhere, or create the default one. */
@@ -406,7 +409,7 @@ export default class TaskGiftPlugin extends Plugin {
 		if (!this.store || !this.dataReady) return;
 		// Each note is only rewritten when its own contents changed.
 		await this.settingsFile.write(this.settings);
-		await this.topicsFile.write(topicsData(this.store.data.dayTitles, this.store.data.stickies));
+		await this.topicsFile.write(topicsData(this.store.data.dayTitles, this.store.data.stickies, this.store.data.capsules));
 		// A sync that found nothing new only moves lastSyncAt. With syncs seconds apart, writing the data note for that
 		// would keep the sync tool busy and clash with the other device's writes, so it is only written now and then.
 		// An older lastSyncAt on disk only makes the next start fetch a little more.
@@ -497,11 +500,13 @@ export default class TaskGiftPlugin extends Plugin {
 			if (replace || Object.keys(d.tasks).length === 0) {
 				const topics = d.dayTitles;
 				const stickies = d.stickies;
+				const capsules = d.capsules;
 				Object.assign(d, inc);
-				// The topics and sticky notes have their own note; keep the ones read from it.
+				// The topics, sticky notes and capsules have their own note; keep the ones read from it.
 				if (!replace) {
 					this.store.mergeDayTitles(topics);
 					this.store.mergeStickies(stickies);
+					this.store.mergeCapsules(capsules);
 				}
 			} else {
 				d.recurrence = { ...d.recurrence, ...inc.recurrence };
@@ -540,7 +545,7 @@ export default class TaskGiftPlugin extends Plugin {
 		const topics = this.topicsFile.parse(raw);
 		if (!topics?.dayTitles || typeof topics.dayTitles !== "object") return;
 		// Written again only when this device holds a topic the note lacks (or a newer one), so the devices settle.
-		this.topicsFile.adopt(topicsData(topics.dayTitles, topics.stickies ?? {}));
+		this.topicsFile.adopt(topicsData(topics.dayTitles, topics.stickies ?? {}, topics.capsules ?? {}));
 		if (this.mergeTopics(topics)) this.refreshViews();
 		this.saveSoon();
 	}
@@ -548,7 +553,9 @@ export default class TaskGiftPlugin extends Plugin {
 	/** Which topic shows right now; changes when one ends at a time of day. */
 	private topicKey(): string {
 		const active = this.store.activeDayTitle(today(), nowTime());
-		return active ? `${active.start}|${active.title.updated}` : "";
+		// A capsule's day starting (at midnight) also redraws the header, so its button shows up.
+		const capsules = this.store.capsulesOpeningOn(today()).length;
+		return active ? `${active.start}|${active.title.updated}|${capsules}` : `|${capsules}`;
 	}
 
 	/** The settings note changed on another device: apply the settings right away. */

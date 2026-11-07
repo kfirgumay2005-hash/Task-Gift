@@ -1,5 +1,5 @@
 import { App, normalizePath, TFile } from "obsidian";
-import type { DayTitle, PluginData, StickyNote, TaskGiftSettings } from "../types";
+import type { DayTitle, PluginData, StickyNote, TaskGiftSettings, TimeCapsule } from "../types";
 
 export const DEFAULT_DATA_PATH = "Task Gift Data.md";
 /** The settings note sits next to the data note. */
@@ -223,13 +223,17 @@ export interface StoredTopics {
 	dayTitles: Record<string, DayTitle>;
 	/** The board's sticky notes: edited by hand now and then like the topics, so they share this note. */
 	stickies?: Record<string, StickyNote>;
+	/** Time capsules: written once and rarely deleted, so they share this note too. */
+	capsules?: Record<string, TimeCapsule>;
 }
 
 /** The topics in date order (sticky notes by ID), so the same contents always give the same note text. */
-export function topicsData(dayTitles: Record<string, DayTitle>, stickies: Record<string, StickyNote>): StoredTopics {
+export function topicsData(dayTitles: Record<string, DayTitle>, stickies: Record<string, StickyNote>, capsules: Record<string, TimeCapsule>): StoredTopics {
 	const sorted: Record<string, DayTitle> = {};
 	for (const d of Object.keys(dayTitles).sort()) sorted[d] = dayTitles[d];
 	const notes: Record<string, StickyNote> = {};
 	for (const id of Object.keys(stickies).sort()) notes[id] = stickies[id];
-	return { dayTitles: sorted, stickies: notes };
+	const sealed: Record<string, TimeCapsule> = {};
+	for (const id of Object.keys(capsules).sort()) sealed[id] = capsules[id];
+	return { dayTitles: sorted, stickies: notes, capsules: sealed };
 }

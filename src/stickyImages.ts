@@ -3,6 +3,8 @@ import { App, normalizePath, TFile } from "obsidian";
 /** Folder (next to the data note) for pictures on the sticky-note board when the setting asks for the plugin's folder. */
 export const STICKY_IMAGES_FOLDER = "Sticky images";
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
+/** Videos are kept only in a topic's time capsule (the sticky board takes pictures). */
+export const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "m4v"];
 
 export function stickyImagesFolderFor(dataPath: string): string {
 	const slash = dataPath.lastIndexOf("/");
@@ -12,6 +14,11 @@ export function stickyImagesFolderFor(dataPath: string): string {
 /** Whether a dropped / pasted file is a picture. */
 export function isImageFile(file: File): boolean {
 	return file.type.startsWith("image/") || IMAGE_EXTENSIONS.includes(extensionOf(file.name));
+}
+
+/** Whether a dropped / picked file is a picture or a video. */
+export function isMediaFile(file: File): boolean {
+	return isImageFile(file) || file.type.startsWith("video/") || VIDEO_EXTENSIONS.includes(extensionOf(file.name));
 }
 
 export function imageFiles(list: FileList | null | undefined): File[] {
@@ -26,17 +33,19 @@ function extensionOf(name: string): string {
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
- * Copies a picture into the vault and resolves with its path: into `folder`, or with `folder` null into Obsidian's
+ * Copies a picture (or a video) into the vault and resolves with its path: into `folder`, or with `folder` null into Obsidian's
  * attachment folder (Settings → Files and links).
  */
 export async function saveStickyImage(app: App, folder: string | null, file: File): Promise<string> {
+	const video = !isImageFile(file) && isMediaFile(file);
 	let ext = extensionOf(file.name);
-	if (!IMAGE_EXTENSIONS.includes(ext)) ext = (file.type.split("/")[1] ?? "png").replace("jpeg", "jpg").replace("svg+xml", "svg");
+	if (!IMAGE_EXTENSIONS.includes(ext) && !VIDEO_EXTENSIONS.includes(ext))
+		ext = (file.type.split("/")[1] ?? (video ? "mp4" : "png")).replace("jpeg", "jpg").replace("svg+xml", "svg").replace("quicktime", "mov");
 	// Pasted pictures are all called "image.png": name them by the time instead.
 	const d = new Date();
 	const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 	const given = file.name.replace(/\.[^.]*$/, "").replace(/[\\/:*?"<>|#^[\]]/g, "").trim();
-	const base = !given || given === "image" ? `Image ${stamp}` : given;
+	const base = !given || given === "image" || given === "video" ? `${video ? "Video" : "Image"} ${stamp}` : given;
 	let path: string;
 	if (folder === null) {
 		// Obsidian picks the folder and a free name; a relative ("./…") folder is taken from the vault root.

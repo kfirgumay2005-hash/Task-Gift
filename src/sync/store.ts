@@ -1,4 +1,4 @@
-import type { DayTitle, PausedTask, PauseState, RecurrenceRule, Reminder, ReminderOffset, StickyNote, StoreData, Task, TaskColor, TaskList, TaskReminders } from "../types";
+import type { DayTitle, PausedTask, PauseState, RecurrenceRule, Reminder, ReminderOffset, StickyNote, StoreData, Task, TaskColor, TaskList, TaskReminders, TimeCapsule } from "../types";
 import { nextOccurrence, reminderDate } from "../recurrence/rule";
 import { addDays, addMonths, today } from "../util/dates";
 
@@ -415,7 +415,74 @@ export class TaskStore {
 		}
 		// Headings this device already dropped as old would otherwise come back with every merge.
 		this.pruneDayTitles();
+		return this.migrateTopicCapsules() || changed;
+	}
+
+	/** The capsules that open on `date` (only then can they be opened), oldest written first. */
+	capsulesOpeningOn(date: string): [string, TimeCapsule][] {
+		return Object.entries(this.data.capsules)
+			.filter(([, c]) => !c.deleted && c.opens === date)
+			.sort((a, b) => a[1].updated - b[1].updated);
+	}
+
+	/** Capsules still waiting for their day (or opening today), soonest first. Their contents stay sealed. */
+	pendingCapsules(from: string): [string, TimeCapsule][] {
+		return Object.entries(this.data.capsules)
+			.filter(([, c]) => !c.deleted && c.opens >= from)
+			.sort((a, b) => (a[1].opens === b[1].opens ? a[1].updated - b[1].updated : a[1].opens < b[1].opens ? -1 : 1));
+	}
+
+	addCapsule(fields: Omit<TimeCapsule, "updated" | "deleted">): string {
+		const id = "capsule-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+		this.data.capsules[id] = { ...fields, text: fields.text.trim(), updated: Date.now() };
+		return id;
+	}
+
+	/** Keeps a deleted capsule for a while (without its contents), so the deletion reaches the other devices. */
+	deleteCapsule(id: string): void {
+		const c = this.data.capsules[id];
+		if (!c) return;
+		this.data.capsules[id] = { ...c, text: "", media: [], deleted: true, updated: Date.now() };
+		this.pruneCapsules();
+	}
+
+	/** Takes over capsules from another device, per capsule the newer edit wins. Returns whether anything changed. */
+	mergeCapsules(incoming: Record<string, TimeCapsule> | undefined): boolean {
+		if (!incoming || typeof incoming !== "object") return false;
+		let changed = false;
+		for (const [id, c] of Object.entries(incoming)) {
+			const mine = this.data.capsules[id];
+			if (!c || typeof c.updated !== "number" || typeof c.opens !== "string" || (mine && mine.updated >= c.updated)) continue;
+			this.data.capsules[id] = { ...c, media: Array.isArray(c.media) ? c.media : [] };
+			changed = true;
+		}
+		this.pruneCapsules();
 		return changed;
+	}
+
+	/**
+	 * The first version kept one capsule on the topic, opening on the topic's day (or today, when that has passed). Moves it into the capsules under an
+	 * ID made from that day, so every device that moves it makes the same one. Returns whether anything moved.
+	 */
+	migrateTopicCapsules(): boolean {
+		let moved = false;
+		for (const [date, t] of Object.entries(this.data.dayTitles)) {
+			const c = t.capsule;
+			if (!c) continue;
+			const id = `capsule-topic-${date}`;
+			if ((c.text?.trim() || c.media?.length) && !this.data.capsules[id])
+				// One whose day has passed opens today instead, so it isn't lost unopened.
+				this.data.capsules[id] = { opens: date < today() ? today() : date, written: date, text: c.text ?? "", media: c.media ?? [], updated: t.updated };
+			const { capsule: _old, ...rest } = t;
+			this.data.dayTitles[date] = rest;
+			moved = true;
+		}
+		return moved;
+	}
+
+	private pruneCapsules(): void {
+		const cutoff = Date.now() - KEEP_DELETED_STICKIES_DAYS * 86400000;
+		for (const [id, c] of Object.entries(this.data.capsules)) if (c.deleted && c.updated < cutoff) delete this.data.capsules[id];
 	}
 
 	/** Sticky notes still on the board, oldest edit first (so the newest is drawn on top). */

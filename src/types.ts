@@ -161,6 +161,28 @@ export interface DayTitleEndNote extends DayTitleStyle {
 	position?: DayTitleEndPosition;
 }
 
+/** The first version's time capsule, kept on the topic. */
+export interface DayTitleCapsule {
+	text: string;
+	media: string[];
+}
+
+/**
+ * A sealed note to a future day: words and pictures / videos (vault paths). It can't be opened or edited before
+ * `opens`; on that day only, a button next to the day's topic opens it.
+ */
+export interface TimeCapsule {
+	/** The day it opens (YYYY-MM-DD). */
+	opens: string;
+	/** The day it was written. */
+	written: string;
+	text: string;
+	media: string[];
+	/** Deleted: kept a while without its contents so the deletion syncs. */
+	deleted?: boolean;
+	updated: number;
+}
+
 export type DayTitleEndPosition = "below" | "above" | "right" | "left";
 
 /** The heading of a day ("what today is about"), shown in the view's header. */
@@ -177,6 +199,8 @@ export interface DayTitle extends DayTitleStyle {
 	untilTime?: string;
 	/** Shown only while `until` is a date. */
 	endNote?: DayTitleEndNote;
+	/** First version of time capsules (one per topic); moved into `StoreData.capsules` on load. */
+	capsule?: DayTitleCapsule;
 	/** Date.now() of the last edit; the newer one wins when two devices edited the same day. */
 	updated: number;
 }
@@ -387,6 +411,8 @@ export interface StoreData {
 	dayTitles: Record<string, DayTitle>;
 	/** Sticky notes on the board, keyed by their own ID. A deleted one stays a while so the deletion syncs. */
 	stickies: Record<string, StickyNote>;
+	/** Time capsules, keyed by their own ID. A deleted one stays a while so the deletion syncs. */
+	capsules: Record<string, TimeCapsule>;
 	/** Paused tasks (the board's Paused column), keyed by the ID the task had. Resumed = kept a while with `on: false` so it syncs. */
 	paused: Record<string, PauseState>;
 	lastSyncAt: string | null;

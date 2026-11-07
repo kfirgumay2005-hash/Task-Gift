@@ -18,8 +18,8 @@ P.createEl = function (t, o) { return make(t, o, this); };
 P.empty = function () { while (this.firstChild) this.removeChild(this.firstChild); };
 P.appendText = function (t) { this.appendChild(document.createTextNode(t)); };
 P.setText = function (t) { this.textContent = t; };
-P.addClass = function (c) { this.classList.add(c); };
-P.removeClass = function (c) { this.classList.remove(c); };
+P.addClass = function (...c) { this.classList.add(...c); };
+P.removeClass = function (...c) { this.classList.remove(...c); };
 P.toggleClass = function (c, b) { this.classList.toggle(c, b); };
 P.hasClass = function (c) { return this.classList.contains(c); };
 P.setAttr = function (k, v) { this.setAttribute(k, v); };
@@ -92,6 +92,7 @@ export class Setting {
 	}
 	setName(n) { this.nameEl.textContent = n; return this; }
 	setDesc(d) { this.descEl.textContent = d; return this; }
+	setHeading() { this.settingEl.classList.add("setting-item-heading"); return this; }
 	addDropdown(cb) {
 		const s = this.controlEl.createEl("select", "dropdown");
 		const d = { selectEl: s, addOption: (k, l) => { s.createEl("option", { text: l, attr: { value: k } }); return d; }, setValue: (v) => { s.value = v; return d; }, onChange: (f) => { s.onchange = () => f(s.value); return d; } };
@@ -102,6 +103,12 @@ export class Setting {
 		const i = this.controlEl.createEl("input", { attr: { type: "text" } });
 		const t = { inputEl: i, setPlaceholder: (p) => { i.placeholder = p; return t; }, setValue: (v) => { i.value = v; return t; }, onChange: (f) => { i.oninput = () => f(i.value); return t; } };
 		cb(t);
+		return this;
+	}
+	addButton(cb) {
+		const el = this.controlEl.createEl("button");
+		const b = { buttonEl: el, setButtonText: (t) => { el.textContent = t; return b; }, setCta: () => { el.classList.add("mod-cta"); return b; }, onClick: (f) => { el.onclick = f; return b; } };
+		cb(b);
 		return this;
 	}
 	addToggle(cb) {

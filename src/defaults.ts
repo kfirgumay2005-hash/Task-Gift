@@ -117,6 +117,7 @@ export function emptyStore(): StoreData {
 		aliases: {},
 		dayTitles: {},
 		stickies: {},
+		capsules: {},
 		paused: {},
 		lastSyncAt: null,
 		lastFullSyncAt: null,

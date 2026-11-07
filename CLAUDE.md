@@ -120,6 +120,13 @@ not in the settings note (otherwise two devices write the settings note at once 
   end date next to it (below/above/left/right) with the user's words and its own style; RTL words → RTL direction; the date is
   DD/MM/YYYY. Both texts use `LetterColorField` in `DayTitleModal.ts` for per-letter colors. Its "+" adds to the same
   palette as the task window (`settings.customTaskColors`, via `plugin.colorPalette()`); right-click removes a color.
+- Time capsules (`store.capsules`, any number, merged per capsule by `updated`, deleted = tombstone; saved in the
+  topics note): sealed words + pictures/videos (vault paths) for one day (`opens`). Written from the topic's window
+  ("New time capsule" → `CapsuleEditModal`, saved at once, not with the topic), which lists only their days, never their
+  contents, and can delete them. Only on `opens` does a button next to the topic show (`capsulesOpeningOn`) and open
+  `CapsuleModal`; before and after there is no way in. Files are copied on Seal (same folder setting as sticky
+  pictures). The first version kept one capsule on the topic (`DayTitle.capsule`); `migrateTopicCapsules` moves it
+  (a past day → today). Test: `dev/ui-test/capsule.test.mjs`.
 - Description templates of calendar entries are notes too, in `Templates/` next to the data note
   (`src/calendars/templates.ts`), read only when the Templates menu opens. Lines ending with ":" and `___` are
   fields; a template with fields opens a fill-in form before it's inserted.

@@ -2,6 +2,7 @@ import { App, Menu, Modal, Notice, Setting, setIcon } from "obsidian";
 import { TASK_COLORS, taskColorCss } from "../defaults";
 import type { ColorPalette, DayTitle, DayTitleEndNote, DayTitleEndPosition, DayTitlePart, DayTitleSize, DayTitleStyle, NamedTaskColor, TaskColor } from "../types";
 import { addDays, shortDate, today } from "../util/dates";
+import { renderCapsulesSection, type TopicCapsules } from "./CapsuleModal";
 import { DateField, INVALID_TIME, TimeField } from "./dateFields";
 
 const SIZE_LABELS: Record<DayTitleSize, string> = { small: "Small", normal: "Normal", large: "Large", huge: "Huge" };
@@ -345,6 +346,8 @@ export class DayTitleModal extends Modal {
 		private readonly onSave: (t: DayTitleFields) => void,
 		/** Given when the heading was written on an earlier day: starts a separate one for today instead. */
 		private readonly onNewToday?: () => void,
+		/** The time capsules section; without it the window has none. */
+		private readonly capsules?: TopicCapsules,
 	) {
 		super(app);
 		this.note = { ...DEFAULT_END_NOTE, ...(current.endNote ?? {}) };
@@ -462,6 +465,9 @@ export class DayTitleModal extends Modal {
 		ends.controlEl.appendChild(untilTime.el);
 		showUntil(end);
 		redraw();
+
+		// Saved on their own (not with the topic): sealing a capsule doesn't wait for this window's Save.
+		if (this.capsules) renderCapsulesSection(this.app, contentEl, this.capsules);
 
 		const buttons = contentEl.createDiv({ cls: "tg-modal-buttons" });
 		buttons.createEl("button", { text: "Clear", cls: "mod-warning" }).addEventListener("click", () => this.save(true));
