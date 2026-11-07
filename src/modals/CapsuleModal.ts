@@ -247,7 +247,7 @@ export class CapsuleModal extends Modal {
 			const list = section.createDiv({ cls: "tg-capsule-gallery" });
 			for (const path of c.media) {
 				const el = renderCapsuleMedia(list, path, this.media.url(path), "tg-capsule-item", true);
-				if (el instanceof HTMLImageElement) {
+				if (el.instanceOf(HTMLImageElement)) {
 					el.setAttribute("title", "Double-click to open");
 					el.addEventListener("dblclick", () => {
 						this.close();

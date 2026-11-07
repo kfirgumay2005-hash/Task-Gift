@@ -23,6 +23,8 @@ P.removeClass = function (...c) { this.classList.remove(...c); };
 P.toggleClass = function (c, b) { this.classList.toggle(c, b); };
 P.hasClass = function (c) { return this.classList.contains(c); };
 P.setAttr = function (k, v) { this.setAttribute(k, v); };
+// Obsidian: instanceof that also works for elements of another window (a pop-out).
+Node.prototype.instanceOf = function (type) { return this instanceof type || this instanceof (this.ownerDocument?.defaultView?.[type.name] ?? type); };
 Object.defineProperty(Node.prototype, "doc", { get() { return this.ownerDocument; } });
 Object.defineProperty(Node.prototype, "win", { get() { return this.ownerDocument.defaultView; } });
 window.activeDocument = document;
