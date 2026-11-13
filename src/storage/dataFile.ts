@@ -1,11 +1,13 @@
 import { App, normalizePath, TFile } from "obsidian";
-import type { DayTitle, PluginData, StickyNote, TaskGiftSettings, TimeCapsule } from "../types";
+import type { DayTitle, PauseState, PluginData, StickyNote, TaskDetails, TaskGiftSettings, TimeCapsule } from "../types";
 
 export const DEFAULT_DATA_PATH = "Task Gift Data.md";
 /** The settings note sits next to the data note. */
 export const SETTINGS_FILE_NAME = "Task Gift Settings.md";
 /** The day topics sit next to the data note too. */
 export const TOPICS_FILE_NAME = "Task Gift Topics.md";
+/** Task colors, times, repeats, modes and paused tasks sit next to the data note too. */
+export const DETAILS_FILE_NAME = "Task Gift Task Details.md";
 /** How many of our own recent writes are recognized when their "modify" event arrives late. */
 const OWN_WRITES_KEPT = 10;
 const JSON_BLOCK_RE = /```json\r?\n([\s\S]*?)\r?\n```/;
@@ -47,6 +49,17 @@ export const TOPICS_NOTE: NoteKind = {
 	description: "This note stores Task Gift's day topics and the board's sticky notes, so every device shows the same ones. Don't edit it by hand.",
 };
 
+/**
+ * What the user sets on tasks (colors, times, repeats, modes) and the paused tasks. They used to travel only in the
+ * data note, which both devices rewrite on every sync, so a change made on one device was often overwritten by the
+ * other device's copy, or reached it only much later. Written only when one of them changes.
+ */
+export const DETAILS_NOTE: NoteKind = {
+	marker: "task-gift-task-details",
+	title: "Task Gift task details",
+	description: "This note stores the colors, times, repeats and modes set on tasks, and the paused tasks, so every device shows the same ones. Don't edit it by hand.",
+};
+
 /** The note's contents apart from the settings (those have their own note). */
 export type StoredData = Partial<PluginData>;
 
@@ -60,6 +73,12 @@ export function normalizeDataPath(input: string): string {
 export function settingsPathFor(dataPath: string): string {
 	const slash = dataPath.lastIndexOf("/");
 	return slash === -1 ? SETTINGS_FILE_NAME : `${dataPath.slice(0, slash)}/${SETTINGS_FILE_NAME}`;
+}
+
+/** Path of the task details note that belongs to a data note. */
+export function detailsPathFor(dataPath: string): string {
+	const slash = dataPath.lastIndexOf("/");
+	return slash === -1 ? DETAILS_FILE_NAME : `${dataPath.slice(0, slash)}/${DETAILS_FILE_NAME}`;
 }
 
 /** Path of the topics note that belongs to a data note. */
@@ -225,6 +244,12 @@ export interface StoredTopics {
 	stickies?: Record<string, StickyNote>;
 	/** Time capsules: written once and rarely deleted, so they share this note too. */
 	capsules?: Record<string, TimeCapsule>;
+}
+
+/** Task details note contents (both sorted by task ID). */
+export interface StoredDetails {
+	details: Record<string, TaskDetails>;
+	paused: Record<string, PauseState>;
 }
 
 /** The topics in date order (sticky notes by ID), so the same contents always give the same note text. */

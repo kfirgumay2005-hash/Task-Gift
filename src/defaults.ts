@@ -119,6 +119,7 @@ export function emptyStore(): StoreData {
 		stickies: {},
 		capsules: {},
 		paused: {},
+		detailsUpdated: {},
 		lastSyncAt: null,
 		lastFullSyncAt: null,
 		gift: emptyGiftState(),

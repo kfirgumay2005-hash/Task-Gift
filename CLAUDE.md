@@ -68,6 +68,15 @@ The user syncs the vault with **Self-hosted LiveSync** on two computers. What wo
      they were lost: the other device rewrote it on its next sync before the topic arrived. Merged per date by
      `updated` (`store.mergeDayTitles`); a device holding a topic the note lacks writes it back, so both settle.
      The data note keeps a copy for older versions and is merged the same way.
+   - `Task Gift Task Details.md`: what the user set on tasks (color, time, repeat, modes — `store.taskDetails()`,
+     stamped per task in `detailsUpdated` only when a value really changes) and the paused tasks. Merged per task by
+     stamp (`mergeTaskDetails`, `mergePaused`); a device holding a newer one writes it back. In the data note the
+     colors were merged as `{...mine, ...theirs}`: a stale copy put old colors back, clearing never synced, and
+     pauses reached the other device late or never. The data note keeps a copy, merged by the same stamps
+     (`mergeDetailsFrom`; unstamped values are only added where missing). `removePausedDuplicates` (on load, on every
+     merge, and inside `removeDuplicates`) keeps one of paused tasks with exactly the same title (any date/list): the
+     one paused last. Colors that differed before the stamps existed are settled with the command "Use this device's
+     task colors…" (`claimTaskDetails`, stamps every task on that device as now). Test: `dev/ui-test/task-details.test.mjs`.
    - The Google sync interval is in seconds (`syncIntervalSeconds`, min `MIN_SYNC_SECONDS`; `syncIntervalMinutes`
      is kept for older versions). A sync that only moved `lastSyncAt` doesn't rewrite the data note (at most every
      `SYNC_STAMP_WRITE_MS`), so frequent syncs don't keep LiveSync busy.

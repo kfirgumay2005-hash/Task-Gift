@@ -1,4 +1,4 @@
-import type { DayTitle, PausedTask, PauseState, RecurrenceRule, Reminder, ReminderOffset, StickyNote, StoreData, Task, TaskColor, TaskList, TaskReminders, TimeCapsule } from "../types";
+import type { DayTitle, PausedTask, PauseState, RecurrenceRule, Reminder, ReminderOffset, StickyNote, StoreData, Task, TaskColor, TaskDetails, TaskList, TaskReminders, TimeCapsule } from "../types";
 import { nextOccurrence, reminderDate } from "../recurrence/rule";
 import { addDays, addMonths, today } from "../util/dates";
 
@@ -12,6 +12,8 @@ const REMINDER_PREFIX = "🔔 ";
 const KEEP_DELETED_STICKIES_DAYS = 60;
 /** Resumed tasks' pause entries are forgotten after this many days. */
 const KEEP_RESUMED_DAYS = 60;
+/** Change stamps of tasks that are gone are forgotten after this many days. */
+const KEEP_DETAILS_DAYS = 60;
 /** How far ahead `removeDuplicates` looks for open tasks with the same title on the same day. */
 export const DUPLICATE_CHECK_MONTHS = 3;
 
@@ -334,6 +336,7 @@ export class TaskStore {
 		if (kept.color) this.data.colors[task.id] = kept.color;
 		if (kept.modes?.length) this.data.taskModes[task.id] = [...kept.modes];
 		if (kept.reminders?.length) this.setReminders(task.id, kept.reminders);
+		if (kept.rule || kept.time || kept.color || kept.modes?.length) this.data.detailsUpdated[task.id] = Date.now();
 		for (const c of kept.subtasks ?? []) {
 			this.create(
 				{ title: c.title, notes: c.notes, listId: kept.listId, due: c.due, parent: task.id, status: c.done ? "completed" : "needsAction" },
@@ -364,14 +367,148 @@ export class TaskStore {
 	}
 
 	/** Takes over pauses from another device, per task the newer change wins. */
-	mergePaused(incoming: Record<string, PauseState> | undefined): void {
-		if (!incoming || typeof incoming !== "object") return;
+	mergePaused(incoming: Record<string, PauseState> | undefined): boolean {
+		if (!incoming || typeof incoming !== "object") return false;
+		let changed = false;
 		for (const [id, p] of Object.entries(incoming)) {
 			const mine = this.data.paused[id];
-			if (!p || typeof p.updated !== "number" || (mine && mine.updated >= p.updated)) continue;
+			if (!p || typeof p.updated !== "number" || typeof p.on !== "boolean" || (mine && mine.updated >= p.updated)) continue;
 			this.data.paused[id] = p;
+			changed = true;
 		}
 		this.prunePaused();
+		if (this.removePausedDuplicates().length) changed = true;
+		return changed;
+	}
+
+	/**
+	 * Paused tasks with exactly the same title are one task paused twice (e.g. on both devices, or a repeating task
+	 * paused again). Keeps the one paused last (then the smallest key), which every device picks alike, and returns
+	 * the titles removed.
+	 */
+	removePausedDuplicates(): string[] {
+		const groups = new Map<string, string[]>();
+		for (const [id, p] of Object.entries(this.data.paused)) {
+			if (!p.on || !p.task) continue;
+			const group = groups.get(p.task.title);
+			if (group) group.push(id);
+			else groups.set(p.task.title, [id]);
+		}
+		const removed: string[] = [];
+		for (const [title, ids] of groups) {
+			if (ids.length < 2) continue;
+			ids.sort((a, b) => this.data.paused[b].updated - this.data.paused[a].updated || (a < b ? -1 : a > b ? 1 : 0));
+			for (const id of ids.slice(1)) {
+				this.data.paused[id] = { on: false, updated: Date.now() };
+				removed.push(title);
+			}
+		}
+		return removed;
+	}
+
+	/**
+	 * Makes this device's colors, times, repeats and modes win on every device: stamps them all as changed now,
+	 * also the tasks that have none (so those get cleared elsewhere). For differences from before the stamps existed.
+	 */
+	claimTaskDetails(): number {
+		const now = Date.now();
+		const ids = new Set([
+			...Object.keys(this.data.tasks),
+			...Object.keys(this.data.colors),
+			...Object.keys(this.data.times),
+			...Object.keys(this.data.recurrence),
+			...Object.keys(this.data.taskModes),
+		]);
+		for (const id of ids) this.data.detailsUpdated[id] = now;
+		return ids.size;
+	}
+
+	/** A task's color, time, repeat and modes as they are now. */
+	private detailsOf(id: string): Omit<TaskDetails, "updated"> {
+		const d: Omit<TaskDetails, "updated"> = {};
+		if (this.data.colors[id]) d.color = this.data.colors[id];
+		if (this.data.times[id]) d.time = this.data.times[id];
+		if (this.data.recurrence[id]) d.rule = this.data.recurrence[id];
+		if (this.data.taskModes[id]?.length) d.modes = this.data.taskModes[id];
+		return d;
+	}
+
+	/** The details the user changed, with when, for the task details note. Sorted, so the same contents give the same note. */
+	taskDetails(): Record<string, TaskDetails> {
+		this.pruneDetails();
+		const out: Record<string, TaskDetails> = {};
+		for (const id of Object.keys(this.data.detailsUpdated).sort()) out[id] = { updated: this.data.detailsUpdated[id], ...this.detailsOf(id) };
+		return out;
+	}
+
+	/** Takes over details changed on another device; per task the newer change wins. Returns whether anything changed. */
+	mergeTaskDetails(incoming: Record<string, TaskDetails> | undefined): boolean {
+		if (!incoming || typeof incoming !== "object") return false;
+		const cutoff = Date.now() - KEEP_DETAILS_DAYS * 86400000;
+		let changed = false;
+		for (const [rawId, d] of Object.entries(incoming)) {
+			if (!d || typeof d.updated !== "number") continue;
+			const id = this.resolveAlias(rawId);
+			if ((this.data.detailsUpdated[id] ?? 0) >= d.updated) continue;
+			if (d.updated < cutoff && !this.data.tasks[id]) continue;
+			const set = <T>(rec: Record<string, T>, v: T | undefined) => {
+				if (v === undefined || v === null) delete rec[id];
+				else rec[id] = v;
+			};
+			set(this.data.colors, d.color);
+			set(this.data.times, d.time);
+			set(this.data.recurrence, d.rule);
+			set(this.data.taskModes, d.modes?.length ? [...d.modes] : undefined);
+			this.data.detailsUpdated[id] = d.updated;
+			changed = true;
+		}
+		return changed;
+	}
+
+	/**
+	 * Takes over colors, times, repeats and modes from another device's data note. Those the user changed go by
+	 * their stamps; the rest (e.g. a next occurrence's copy) are only added where this device has none, so an
+	 * outdated copy can't put an old value back.
+	 */
+	mergeDetailsFrom(inc: StoreData): boolean {
+		const stamped: Record<string, TaskDetails> = {};
+		for (const [id, updated] of Object.entries(inc.detailsUpdated ?? {})) {
+			if (typeof updated !== "number") continue;
+			const d: TaskDetails = { updated };
+			if (inc.colors?.[id]) d.color = inc.colors[id];
+			if (inc.times?.[id]) d.time = inc.times[id];
+			if (inc.recurrence?.[id]) d.rule = inc.recurrence[id];
+			if (inc.taskModes?.[id]?.length) d.modes = inc.taskModes[id];
+			stamped[id] = d;
+		}
+		let changed = this.mergeTaskDetails(stamped);
+		const add = <T>(mine: Record<string, T>, theirs: Record<string, T> | undefined) => {
+			for (const [rawId, v] of Object.entries(theirs ?? {})) {
+				if (rawId in stamped) continue;
+				const id = this.resolveAlias(rawId);
+				if (id in this.data.detailsUpdated || id in mine) continue;
+				mine[id] = v;
+				changed = true;
+			}
+		};
+		add(this.data.colors, inc.colors);
+		add(this.data.times, inc.times);
+		add(this.data.recurrence, inc.recurrence);
+		add(this.data.taskModes, inc.taskModes);
+		return changed;
+	}
+
+	/** Stamps of tasks that are gone are kept a while, so the other device can't bring the details back at once. */
+	private pruneDetails(): void {
+		const cutoff = Date.now() - KEEP_DETAILS_DAYS * 86400000;
+		for (const [id, t] of Object.entries(this.data.detailsUpdated)) if (t < cutoff && !this.data.tasks[id]) delete this.data.detailsUpdated[id];
+	}
+
+	/** Paused tasks sorted by key, for the task details note. */
+	pausedSorted(): Record<string, PauseState> {
+		const out: Record<string, PauseState> = {};
+		for (const id of Object.keys(this.data.paused).sort()) out[id] = this.data.paused[id];
+		return out;
 	}
 
 	private prunePaused(): void {
@@ -591,6 +728,9 @@ export class TaskStore {
 			task.dirty = true;
 			task.localUpdated = Date.now();
 		}
+		// Stamped only when a value really differs (the task window passes all of them on every save), so the
+		// newer change wins on the other device.
+		const before = JSON.stringify(this.detailsOf(task.id));
 		if (edit.time !== undefined) {
 			if (edit.time) this.data.times[task.id] = edit.time;
 			else delete this.data.times[task.id];
@@ -613,6 +753,7 @@ export class TaskStore {
 			} else delete this.data.recurrence[task.id];
 			changed = true;
 		}
+		if (JSON.stringify(this.detailsOf(task.id)) !== before) this.data.detailsUpdated[task.id] = Date.now();
 		if (edit.reminders !== undefined && this.setReminders(task.id, edit.reminders)) changed = true;
 		if (changed) {
 			this.syncReminders();
@@ -687,6 +828,7 @@ export class TaskStore {
 		moveKey(this.data.spawned);
 		moveKey(this.data.snapshots);
 		moveKey(this.data.paused);
+		moveKey(this.data.detailsUpdated);
 		for (const [k, v] of Object.entries(this.data.spawned)) if (v === oldId) this.data.spawned[k] = newId;
 		this.relinkReminder(oldId, newId);
 		const g = this.data.gift;
@@ -745,7 +887,7 @@ export class TaskStore {
 
 	/**
 	 * Deletes open tasks that have exactly the same title on the same day, from today up to `months` ahead, and
-	 * returns the titles removed. Two devices can each create the next occurrence of a repeating task before either
+	 * paused tasks with exactly the same title (`removePausedDuplicates`); returns the titles removed. Two devices can each create the next occurrence of a repeating task before either
 	 * sees the other's copy; both copies reach Google. Every device must keep the same copy, so the choice only uses
 	 * what Google gave all of them (the smallest Google ID); groups with a copy not yet in Google wait for a later sync.
 	 */
@@ -760,7 +902,7 @@ export class TaskStore {
 			if (group) group.push(t);
 			else groups.set(key, [t]);
 		}
-		const removed: string[] = [];
+		const removed: string[] = this.removePausedDuplicates();
 		for (const group of groups.values()) {
 			if (group.length < 2 || group.some((t) => isLocalId(t.id))) continue;
 			// A task with subtasks isn't a spawned copy; leave such groups to the user.

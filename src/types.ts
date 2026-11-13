@@ -259,6 +259,15 @@ export interface PausedTask {
  * A task on a break: deleted from Google (so it leaves every Google Tasks app) and kept here, shown in the board's
  * Paused column until it is resumed as a new task.
  */
+/** A task's local details as one device last set them, for the task details note. Missing field = none. */
+export interface TaskDetails {
+	updated: number;
+	color?: TaskColor;
+	time?: string;
+	rule?: RecurrenceRule;
+	modes?: string[];
+}
+
 export interface PauseState {
 	/** false = resumed or deleted; kept a while without `task` so that syncs. */
 	on: boolean;
@@ -415,6 +424,11 @@ export interface StoreData {
 	capsules: Record<string, TimeCapsule>;
 	/** Paused tasks (the board's Paused column), keyed by the ID the task had. Resumed = kept a while with `on: false` so it syncs. */
 	paused: Record<string, PauseState>;
+	/**
+	 * When the user last changed a task's color, time, repeat or modes (Date.now()), keyed by task ID. Lets the
+	 * newer change win between devices; without it a stale copy from the other device put an old color back.
+	 */
+	detailsUpdated: Record<string, number>;
 	lastSyncAt: string | null;
 	lastFullSyncAt: string | null;
 	gift: GiftState;

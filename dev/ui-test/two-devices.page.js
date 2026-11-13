@@ -108,3 +108,28 @@ window.onDisk = (name, id) => {
 	return n ? { x: n.x, y: n.y, updated: n.updated } : null;
 };
 window.ready = true;
+
+// --- task details (colors) and paused tasks ---
+window.addTask = (name, title, due) => {
+	const p = devices[name].plugin;
+	const t = p.store.create({ title, notes: "", listId: "L1", due, parent: null }, "remote");
+	p.touch();
+	return t.id;
+};
+window.setColor = (name, id, color) => devices[name].plugin.store.update(id, { color }, "remote");
+window.colorOf = (name, id) => devices[name].plugin.store.color(id);
+window.pause = (name, id) => devices[name].plugin.store.pause(id);
+window.pausedTitles = (name) => devices[name].plugin.store.pausedTasks().map((t) => t.title).sort();
+/** Puts an old copy of a device's data note on the other device, like LiveSync delivering a stale revision late. */
+window.stale = { copy: null };
+window.keepDataNote = (name) => { window.stale.copy = { ...devices[name].disk.get(DATA) }; };
+window.deliverKept = (to) => devices[to].receive(DATA, { ...window.stale.copy, mtime: Date.now() + 1 });
+/** Pauses a copy of a task directly in a device's store, as if it had been paused there before the other's pause arrived. */
+window.pauseCopy = (name, key, title, due) => {
+	const p = devices[name].plugin;
+	p.store.data.paused[key] = { on: true, updated: Date.now(), task: { title, notes: "", listId: "L1", due, parent: null } };
+	p.touch();
+};
+/** A color from before the stamps existed: set without a stamp. */
+window.oldColor = (name, id, color) => { devices[name].plugin.store.data.colors[id] = color; };
+window.claim = (name) => { const p = devices[name].plugin; p.store.claimTaskDetails(); p.touch(); };

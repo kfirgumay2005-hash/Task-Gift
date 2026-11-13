@@ -22,6 +22,9 @@ import { nowTime, today } from "./util/dates";
 import {
 	DATA_NOTE,
 	DataFile,
+	DETAILS_NOTE,
+	detailsPathFor,
+	StoredDetails,
 	DEFAULT_DATA_PATH,
 	normalizeDataPath,
 	SETTINGS_NOTE,
@@ -73,6 +76,9 @@ export default class TaskGiftPlugin extends Plugin {
 	private dataFile!: DataFile<StoredData>;
 	private settingsFile!: DataFile<StoredSettings>;
 	private topicsFile!: DataFile<StoredTopics>;
+	private detailsFile!: DataFile<StoredDetails>;
+	/** Task details read from their note at startup, merged into the store once it exists. */
+	private loadedDetails: StoredDetails | null = null;
 	/** Topics read from their note at startup, merged into the store once it exists. */
 	private loadedTopics: StoredTopics | null = null;
 	/** The topic the views last showed, to re-draw when it ends at a time of day. */
@@ -103,7 +109,9 @@ export default class TaskGiftPlugin extends Plugin {
 		useWeekStart(() => this.settings.weekStart);
 
 		this.store = new TaskStore(this.loadedStore, (source) => this.onStoreChange(source));
+		if (this.loadedDetails) this.mergeDetails(this.loadedDetails);
 		this.store.migratePauses();
+		this.store.removePausedDuplicates();
 		if (this.loadedTopics) this.mergeTopics(this.loadedTopics);
 		this.store.migrateTopicCapsules();
 		this.shownTopic = this.topicKey();
@@ -154,6 +162,11 @@ export default class TaskGiftPlugin extends Plugin {
 		this.addCommand({ id: "sync-now", name: "Sync now", callback: () => void this.syncNow() });
 		this.addCommand({ id: "full-resync", name: "Full resync with Google", callback: () => void this.syncNow(true) });
 		this.addCommand({ id: "remove-duplicates", name: "Remove duplicate tasks", callback: () => this.removeDuplicates() });
+		this.addCommand({
+			id: "claim-task-details",
+			name: "Use this device's task colors, times and repeats on every device",
+			callback: () => this.claimTaskDetails(),
+		});
 		this.addCommand({ id: "sync-all-completed", name: "Download all completed tasks from Google", callback: () => void this.syncAllCompleted() });
 		this.addCommand({
 			id: "toggle-gift-mode",
@@ -195,6 +208,7 @@ export default class TaskGiftPlugin extends Plugin {
 		if (this.dataFile.isDataFile(file)) void this.onDataFileChanged(true);
 		else if (this.settingsFile.isDataFile(file)) void this.onSettingsFileChanged(true);
 		else if (this.topicsFile.isDataFile(file)) void this.onTopicsFileChanged(true);
+		else if (this.detailsFile.isDataFile(file)) void this.onDetailsFileChanged(true);
 		else if (this.calendars.isCalendarPath(file.path)) void this.calendars.refresh();
 	}
 
@@ -206,6 +220,7 @@ export default class TaskGiftPlugin extends Plugin {
 			await this.onSettingsFileChanged(false);
 			await this.onDataFileChanged(false);
 			await this.onTopicsFileChanged(false);
+			await this.onDetailsFileChanged(false);
 			await this.calendars.refresh();
 			await this.checkForUpdate();
 		} catch (e) {
@@ -328,6 +343,7 @@ export default class TaskGiftPlugin extends Plugin {
 		if (!store.stickies || typeof store.stickies !== "object") store.stickies = {};
 		if (!store.capsules || typeof store.capsules !== "object") store.capsules = {};
 		if (!store.paused || typeof store.paused !== "object") store.paused = {};
+		if (!store.detailsUpdated || typeof store.detailsUpdated !== "object") store.detailsUpdated = {};
 		store.gift = Object.assign(emptyGiftState(), store.gift ?? {});
 		delete (store as unknown as Record<string, unknown>).renderedIds; // left over from the removed sync note
 		return store;
@@ -344,6 +360,7 @@ export default class TaskGiftPlugin extends Plugin {
 		this.dataFile = new DataFile(this.app, DATA_NOTE, dataPath);
 		this.settingsFile = new DataFile(this.app, SETTINGS_NOTE, settingsPathFor(dataPath));
 		this.topicsFile = new DataFile(this.app, TOPICS_NOTE, topicsPathFor(dataPath));
+		this.detailsFile = new DataFile(this.app, DETAILS_NOTE, detailsPathFor(dataPath));
 
 		let data = await this.dataFile.read();
 		if (!data && (local.settings || local.store)) {
@@ -361,6 +378,39 @@ export default class TaskGiftPlugin extends Plugin {
 		this.loadedStore = TaskGiftPlugin.mergeStore(data?.store);
 		this.writtenSyncAt = this.loadedStore.lastSyncAt;
 		this.loadedTopics = await this.readTopics();
+		this.loadedDetails = await this.readDetails();
+	}
+
+	/** Reads the task details note; what it holds counts as written, so only a real change writes it again. */
+	private async readDetails(): Promise<StoredDetails | null> {
+		return this.adoptDetails(await this.detailsFile.read());
+	}
+
+	private adoptDetails(d: StoredDetails | null): StoredDetails | null {
+		if (!d || typeof d !== "object") return null;
+		const details = d.details && typeof d.details === "object" ? d.details : {};
+		const paused = d.paused && typeof d.paused === "object" ? d.paused : {};
+		const sort = <T>(rec: Record<string, T>) => Object.fromEntries(Object.keys(rec).sort().map((k) => [k, rec[k]]));
+		this.detailsFile.adopt({ details: sort(details), paused: sort(paused) });
+		return { details, paused };
+	}
+
+	/** Takes over task details and pauses from their note. Returns whether anything changed. */
+	private mergeDetails(d: StoredDetails): boolean {
+		const details = this.store.mergeTaskDetails(d.details);
+		const paused = this.store.mergePaused(d.paused);
+		return details || paused;
+	}
+
+	/** The task details note changed on another device: take over newer changes, and write back any it lacks. */
+	private async onDetailsFileChanged(force: boolean): Promise<void> {
+		const raw = await this.detailsFile.readChanged(force);
+		if (raw === null || this.detailsFile.isOwnWrite(raw)) return;
+		const d = this.adoptDetails(this.detailsFile.parse(raw));
+		if (!d) return;
+		// Written again only when this device holds a change the note lacks (or a newer one), so the devices settle.
+		if (this.mergeDetails(d)) this.refreshViews();
+		this.saveSoon();
 	}
 
 	/** Reads the topics note; what it holds counts as written, so only a real change writes it again. */
@@ -387,12 +437,15 @@ export default class TaskGiftPlugin extends Plugin {
 				this.dataFile.path = found;
 				this.settingsFile.path = settingsPathFor(found);
 				this.topicsFile.path = topicsPathFor(found);
+				this.detailsFile.path = detailsPathFor(found);
 				const data = await this.dataFile.read();
 				const settings = await this.settingsFile.read();
 				if (data || settings) this.applyExternal({ ...data, ...(settings ? { settings } : {}) }, true);
 				if (settings) this.settingsFile.adopt(this.settings);
 				const topics = await this.readTopics();
 				if (topics) this.mergeTopics(topics);
+				const details = await this.readDetails();
+				if (details) this.mergeDetails(details);
 			}
 			await this.savePointer();
 		}
@@ -410,6 +463,7 @@ export default class TaskGiftPlugin extends Plugin {
 		// Each note is only rewritten when its own contents changed.
 		await this.settingsFile.write(this.settings);
 		await this.topicsFile.write(topicsData(this.store.data.dayTitles, this.store.data.stickies, this.store.data.capsules));
+		await this.detailsFile.write({ details: this.store.taskDetails(), paused: this.store.pausedSorted() });
 		// A sync that found nothing new only moves lastSyncAt. With syncs seconds apart, writing the data note for that
 		// would keep the sync tool busy and clash with the other device's writes, so it is only written now and then.
 		// An older lastSyncAt on disk only makes the next start fetch a little more.
@@ -456,9 +510,12 @@ export default class TaskGiftPlugin extends Plugin {
 			this.dataFile.path = target;
 			this.settingsFile.path = settingsTarget;
 			this.topicsFile.path = topicsPathFor(target);
+			this.detailsFile.path = detailsPathFor(target);
 			this.applyExternal({ ...existing, ...(settings ? { settings } : {}) }, true);
 			const topics = await this.readTopics();
 			if (topics) this.mergeTopics(topics);
+			const details = await this.readDetails();
+			if (details) this.mergeDetails(details);
 		} else {
 			try {
 				await this.dataFile.moveTo(target);
@@ -467,6 +524,10 @@ export default class TaskGiftPlugin extends Plugin {
 				const topicsTarget = topicsPathFor(target);
 				if (await this.topicsFile.exists(topicsTarget)) this.topicsFile.path = topicsTarget;
 				else await this.topicsFile.moveTo(topicsTarget);
+				const detailsTarget = detailsPathFor(target);
+				if (await this.detailsFile.exists(detailsTarget)) this.detailsFile.path = detailsTarget;
+				else if (await this.detailsFile.exists()) await this.detailsFile.moveTo(detailsTarget);
+				else this.detailsFile.path = detailsTarget;
 			} catch (e) {
 				new Notice(`Could not move the data file: ${e instanceof Error ? e.message : String(e)}`);
 				return false;
@@ -501,18 +562,20 @@ export default class TaskGiftPlugin extends Plugin {
 				const topics = d.dayTitles;
 				const stickies = d.stickies;
 				const capsules = d.capsules;
+				const paused = d.paused;
+				const details = this.store.taskDetails();
 				Object.assign(d, inc);
-				// The topics, sticky notes and capsules have their own note; keep the ones read from it.
+				// The topics, sticky notes, capsules, task details and pauses have their own notes; keep the ones read from them.
 				if (!replace) {
 					this.store.mergeDayTitles(topics);
 					this.store.mergeStickies(stickies);
 					this.store.mergeCapsules(capsules);
+					this.store.mergePaused(paused);
+					this.store.mergeTaskDetails(details);
 				}
 			} else {
-				d.recurrence = { ...d.recurrence, ...inc.recurrence };
-				d.times = { ...d.times, ...inc.times };
-				d.colors = { ...d.colors, ...inc.colors };
-				d.taskModes = { ...d.taskModes, ...inc.taskModes };
+				// By their change stamps: taking the other device's copy as is put old colors back.
+				this.store.mergeDetailsFrom(inc);
 				this.store.mergeReminders(inc.reminders);
 				this.store.mergePaused(inc.paused);
 				d.spawned = { ...d.spawned, ...inc.spawned };
@@ -712,11 +775,27 @@ export default class TaskGiftPlugin extends Plugin {
 	removeDuplicates(): void {
 		const removed = this.store.removeDuplicates();
 		if (!removed.length) {
-			new Notice(`No duplicate tasks in the next ${DUPLICATE_CHECK_MONTHS} months.`);
+			new Notice(`No duplicate paused tasks, and none in the next ${DUPLICATE_CHECK_MONTHS} months.`);
 			return;
 		}
 		new Notice(duplicatesMessage(removed));
 		this.store.notify("local");
+	}
+
+	/** For colors that differed between devices before they were stamped: this device's ones go to every device. */
+	claimTaskDetails(): void {
+		new ConfirmModal(
+			this.app,
+			"Use this device's task colors?",
+			"The colors, times, repeats and modes of every task on this device replace the ones on your other devices (also where this device has none). Do this on the device that shows them right.",
+			"Use these",
+			() => {
+				const n = this.store.claimTaskDetails();
+				this.saveSoon();
+				this.refreshViews();
+				new Notice(`Task Gift: sent the details of ${n} task(s) to your other devices.`);
+			},
+		).open();
 	}
 
 	/** Keeps completed tasks forever and downloads every completed task from Google. */
